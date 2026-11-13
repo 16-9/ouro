@@ -34,8 +34,8 @@ globalThis.Ouro = (function () {
     };
     const v = Vocabulary;
 
-    const banner ="
-                                       .:-----.
+    const banner = `
+                                     .:-----.
                              :#@@@@%###++++*##%@@@@@*:.
                          .@@@%:                   +%@@.
                       .@@@:.         :*##:      =         .@%
@@ -65,7 +65,7 @@ globalThis.Ouro = (function () {
                          -@@@%             ...--:..*@@@.
                              :#@@@%#*-    :+##%@@@=:
                                     .::---:.
-";
+`;
 
     // ==========================================
     // BOOK I: THE PRIMORDIAL SHADOWS (Pure Allocation)

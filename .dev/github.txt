@@ -1,0 +1,29 @@
+**Yes—with one important clarification:** `src/index.js` becomes your **single source of truth** (replacing the manual split between `ouro_dev.js` and `ouro_stable.js`).
+
+Here is how that works in practice so you never have to maintain two duplicate files again:
+
+### 1. What Goes Into `src/index.js`
+
+You take the latest working code from `ouro_dev.js` (which has all your newest improvements) and move it into `src/index.js`. From this point on, **`src/index.js` is the only place you write or edit your core framework code.**
+
+### 2. How "Dev" vs. "Stable" Works Now
+
+Instead of keeping two separate source files (`ouro_dev.js` and `ouro_stable.js`), **Git** and your **build output** handle the two states:
+
+* **While testing ("Dev"):**
+* You edit `src/index.js` (along with `graph.js`, `scraper.js`, `fragments.js`).
+* Your build script compiles `src/index.js` into `dist/ouro.dev.js` (unminified, with inline source maps for easy debugging in Chrome DevTools).
+* Your local userscripts point their `@require` to `file:///.../ouro/dist/ouro.dev.js`.
+* You do this work on a `dev` Git branch (or uncommitted locally while experimenting).
+
+
+* **When ready for daily use ("Stable"):**
+* Once your changes in `src/index.js` are tested and solid, you merge into `main` and run your production build (`npm run build`), which compiles `src/index.js` into `dist/ouro.stable.js` (or `dist/ouro.js`).
+* You push to GitHub (and tag a release, e.g., `v1.0.0`).
+* Your production userscripts point their `@require` to the GitHub raw URL on `main` (`[https://raw.githubusercontent.com/](https://raw.githubusercontent.com/)<you>/ouro/main/dist/ouro.stable.js`).
+
+
+
+### 3. What About Your Existing `ouro_stable.js` Gist?
+
+When you first initialize the repo, you can commit your current `ouro_stable.js` as `src/index.js` on `main` first (establishing your baseline `v1.0.0`), then create a `dev` branch and drop `ouro_dev.js` on top of `src/index.js`—that way Git immediately shows you the exact diff between your old stable code and your current dev work.
