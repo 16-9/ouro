@@ -1,3 +1,6 @@
+# ./dev/ directory local only
+.dev/
+
 # Sublime Text
 *.sublime-workspace
 
