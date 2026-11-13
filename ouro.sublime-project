@@ -1,0 +1,33 @@
+{
+	"folders":
+	[
+		{
+			"path": ".",
+			"folder_exclude_patterns": [".git", "node_modules"],
+			"file_exclude_patterns": [".DS_Store", "*.sublime-workspace"]
+		}
+	],
+	"settings":
+	{
+		"tab_size": 4,
+		"translate_tabs_to_spaces": true
+	},
+	"build_systems":
+	[
+		{
+			"name": "Ouro: Run Unit Tests (Node CLI)",
+			"cmd": ["/opt/homebrew/bin/node", "tests/run-node.js"],
+			"working_dir": "${project_path}"
+		},
+		{
+			"name": "Ouro: Run Browser Test Harness (Chrome)",
+			"shell_cmd": "osascript -e 'tell application \"Google Chrome\"' -e 'activate' -e 'set matchingTabs to (tabs of windows whose URL contains \"ouro_test.html\")' -e 'set found to false' -e 'repeat with winTabs in matchingTabs' -e 'repeat with t in winTabs' -e 'reload t' -e 'set found to true' -e 'end repeat' -e 'end repeat' -e 'end tell' -e 'if not found then do shell script \"open -na \\\"Google Chrome\\\" --args --profile-directory=\\\"Profile 7\\\" \\\"file://${project_path}/tests/ouro_test.html\\\"\"'",
+			"working_dir": "${project_path}"
+		},
+		{
+			"name": "Ouro: Syntax Check Current File",
+			"cmd": ["/opt/homebrew/bin/node", "--check", "$file"],
+			"working_dir": "${project_path}"
+		}
+	]
+}

@@ -1,32 +1,3 @@
-// @require      https://gist.githubusercontent.com/16-9/b9a76cfe8f328547ed860baec509e1b0/raw/Ouro_graph.js?refresh=3
-
-// 261112 1024 Major refactoring completed using Antigravity
-
-/**
- * ============================================================================
- * GRAPH EXTENSION & DOMAIN PAGES — PRESERVATION & RUNTIME FIXES
- * ============================================================================
- *
- * - Byte-for-Byte Preservation:
- *   Per specification, zero characters were modified between
- *   `// START GRAPH EXTENSION` and `registerGlobals({MovieGraph, PlexRecord});`.
- *
- * - Runtime Issues Resolved via Core & Extension Enhancements:
- *   1. `MovieGraph` & `PlexRecord` (`kindOf: Graph`) now inherit `Graph.__private`
- *      from `OURO CORE`, allowing `MovieGraph.get()`, `MovieGraph.put()`, and
- *      `PlexRecord.get()` to invoke private `StorageTrait` helpers (`_pack`,
- *      `_unpack`, `_cachePurgeIfNeeded`) without throwing a `TypeError`.
- *   2. `ytsBrowsePage.enrich()` calling `await plexLibraryPage.extract()` on a
- *      cold/expired cache now automatically resolves `plexServerInfoPage` first
- *      via `Page.prototype.resolveProviders()`, guaranteeing `Plex.serverUrl` is
- *      populated before `plexLibraryPage` builds its request URL.
- *   3. `ytsBrowsePage.scrape()` and `DOMExtractor` now properly extract all
- *      `DOMValue` scraps (`this.scraps.movies[i].e` and `this.data.movies`)
- *      without triggering premature prototype getters on `NativeElement`.
- * ============================================================================
- */
-
-// START GRAPH EXTENSION
 /* global unsafeWindow Ouro Extension Class globalCache */
 Ouro.graphSystemExtension = new Extension(
     "Graph System",
@@ -71,10 +42,14 @@ Ouro.graphSystemExtension = new Extension(
 
                             const instance = new this();
 
-                            const graphId = instance.fromCache(`Index_${searchString}`);
+                            const graphId = instance.fromCache(
+                                `Index_${searchString}`,
+                            );
                             if (!graphId) return null;
 
-                            const vaultData = instance.fromCache(`Vault_${graphId}`);
+                            const vaultData = instance.fromCache(
+                                `Vault_${graphId}`,
+                            );
                             if (!vaultData) return null;
 
                             instance.initialize(
@@ -97,8 +72,12 @@ Ouro.graphSystemExtension = new Extension(
                                 const secondary = this.secondaryKeys || [];
 
                                 const routingKey =
-                                    Object.keys(newPayload).find((k) => primary.includes(k)) ||
-                                    Object.keys(newPayload).find((k) => secondary.includes(k));
+                                    Object.keys(newPayload).find((k) =>
+                                        primary.includes(k),
+                                    ) ||
+                                    Object.keys(newPayload).find((k) =>
+                                        secondary.includes(k),
+                                    );
 
                                 if (!routingKey) {
                                     throw new Error(
@@ -106,7 +85,9 @@ Ouro.graphSystemExtension = new Extension(
                                     );
                                 }
 
-                                query = { [routingKey]: newPayload[routingKey] };
+                                query = {
+                                    [routingKey]: newPayload[routingKey],
+                                };
                             } else {
                                 throw new Error(
                                     `[${this.name}] put() accepts either (query, payload) or (payload).`,
@@ -116,10 +97,18 @@ Ouro.graphSystemExtension = new Extension(
                             let instance = this.get(query);
 
                             if (!instance) {
-                                instance = new this(this.generateGraphId(), [], []);
+                                instance = new this(
+                                    this.generateGraphId(),
+                                    [],
+                                    [],
+                                );
                             }
 
-                            const unifiedPayload = Object.assign({}, query, newPayload);
+                            const unifiedPayload = Object.assign(
+                                {},
+                                query,
+                                newPayload,
+                            );
                             instance.put(unifiedPayload);
 
                             return instance;
@@ -145,7 +134,8 @@ Ouro.graphSystemExtension = new Extension(
                         // ==========================================
                         getAll() {
                             // 1. Get the exact length of "Ouro_TestGraph_"
-                            const prefixLength = this._cacheKey(undefined).length + 1;
+                            const prefixLength =
+                                this._cacheKey(undefined).length + 1;
 
                             // 2. Isolate, unquote, and filter the Vault keys
                             const vaultKeys = this.listCached()
@@ -155,10 +145,14 @@ Ouro.graphSystemExtension = new Extension(
                             return vaultKeys
                                 .map((vaultKey) => {
                                     const instance = new this();
-                                    const vaultData = instance.fromCache(vaultKey);
+                                    const vaultData =
+                                        instance.fromCache(vaultKey);
                                     if (!vaultData) return null;
 
-                                    const graphId = vaultKey.replace("Vault_", "");
+                                    const graphId = vaultKey.replace(
+                                        "Vault_",
+                                        "",
+                                    );
                                     instance.initialize(
                                         graphId,
                                         vaultData.payload,
@@ -187,11 +181,15 @@ Ouro.graphSystemExtension = new Extension(
                         },
 
                         recordAll() {
-                            return this.getAll().map((instance) => instance.record);
+                            return this.getAll().map(
+                                (instance) => instance.record,
+                            );
                         },
 
                         recordsAll() {
-                            return this.getAll().flatMap((instance) => instance.records);
+                            return this.getAll().flatMap(
+                                (instance) => instance.records,
+                            );
                         },
                     },
 
@@ -214,10 +212,14 @@ Ouro.graphSystemExtension = new Extension(
                                 const colon = idx.indexOf(":");
                                 const k = idx.slice(0, colon);
                                 let v = idx.slice(colon + 1);
-                                output[k] = /^\d+$/.test(v) ? parseInt(v, 10) : v;
+                                output[k] = /^\d+$/.test(v)
+                                    ? parseInt(v, 10)
+                                    : v;
                             });
 
-                            output.variants = Array.isArray(this.payload) ? this.payload : [];
+                            output.variants = Array.isArray(this.payload)
+                                ? this.payload
+                                : [];
                             return output;
                         },
 
@@ -228,10 +230,15 @@ Ouro.graphSystemExtension = new Extension(
                                 const colon = idx.indexOf(":");
                                 const k = idx.slice(0, colon);
                                 let v = idx.slice(colon + 1);
-                                baseRecord[k] = /^\d+$/.test(v) ? parseInt(v, 10) : v;
+                                baseRecord[k] = /^\d+$/.test(v)
+                                    ? parseInt(v, 10)
+                                    : v;
                             });
 
-                            if (!Array.isArray(this.payload) || this.payload.length === 0) {
+                            if (
+                                !Array.isArray(this.payload) ||
+                                this.payload.length === 0
+                            ) {
                                 return [baseRecord];
                             }
 
@@ -261,7 +268,9 @@ Ouro.graphSystemExtension = new Extension(
                             }
 
                             if (hasVariantData) {
-                                this.payload = Array.isArray(this.payload) ? this.payload : [];
+                                this.payload = Array.isArray(this.payload)
+                                    ? this.payload
+                                    : [];
 
                                 const variantSignature = JSON.stringify(
                                     Object.entries(variantPayload).sort(),
@@ -269,8 +278,9 @@ Ouro.graphSystemExtension = new Extension(
 
                                 const isDuplicate = this.payload.some(
                                     (existing) =>
-                                        JSON.stringify(Object.entries(existing).sort()) ===
-                                        variantSignature,
+                                        JSON.stringify(
+                                            Object.entries(existing).sort(),
+                                        ) === variantSignature,
                                 );
 
                                 if (!isDuplicate) {
@@ -307,18 +317,24 @@ Ouro.graphSystemExtension = new Extension(
 
                             if (removed.length > 0) {
                                 this.payload = kept;
-                                const secKeys = this.constructor.secondaryKeys || [];
+                                const secKeys =
+                                    this.constructor.secondaryKeys || [];
                                 for (const rem of removed) {
                                     for (const sk of secKeys) {
                                         if (
                                             rem[sk] != null &&
                                             !kept.some((v) => v[sk] === rem[sk])
                                         ) {
-                                            this.clearCache(`Index_${sk}:${rem[sk]}`);
+                                            this.clearCache(
+                                                `Index_${sk}:${rem[sk]}`,
+                                            );
                                         }
                                     }
                                 }
-                                if (this.constructor.autoCommit && this.graphId) {
+                                if (
+                                    this.constructor.autoCommit &&
+                                    this.graphId
+                                ) {
                                     this.commit();
                                 }
                             }
@@ -338,10 +354,14 @@ Ouro.graphSystemExtension = new Extension(
                             });
 
                             this.indexes.forEach((idxString) => {
-                                this.toCache(`Index_${idxString}`, this.graphId);
+                                this.toCache(
+                                    `Index_${idxString}`,
+                                    this.graphId,
+                                );
                             });
 
-                            const secKeys = this.constructor.secondaryKeys || [];
+                            const secKeys =
+                                this.constructor.secondaryKeys || [];
                             if (secKeys.length && Array.isArray(this.payload)) {
                                 for (const variant of this.payload) {
                                     for (const sk of secKeys) {
@@ -365,12 +385,15 @@ Ouro.graphSystemExtension = new Extension(
                                 this.clearCache(`Index_${idxString}`);
                             });
 
-                            const secKeys = this.constructor.secondaryKeys || [];
+                            const secKeys =
+                                this.constructor.secondaryKeys || [];
                             if (secKeys.length && Array.isArray(this.payload)) {
                                 for (const variant of this.payload) {
                                     for (const sk of secKeys) {
                                         if (variant && variant[sk] != null) {
-                                            this.clearCache(`Index_${sk}:${variant[sk]}`);
+                                            this.clearCache(
+                                                `Index_${sk}:${variant[sk]}`,
+                                            );
                                         }
                                     }
                                 }
@@ -405,4 +428,3 @@ Ouro.graphSystemExtension = new Extension(
         Ouro.publish("Graph", Graph);
     },
 );
-// END GRAPH EXTENSION

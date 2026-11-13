@@ -1,68 +1,4 @@
-// @require      https://gist.githubusercontent.com/16-9/6ca20089d057fb63a4746c2fe4be590d/raw/Ouro_scraper.js?refresh=4
-
-// 261112 1024 Major refactoring completed using Antigravity
-// 261112 1145 Added declarative Page schema, DOMValue.create() builder & event/DOM helpers, and network concurrency/retry control
-
-/**
- * ============================================================================
- * SCRAPER EXTENSION — CHANGELOG & ARCHITECTURAL IMPROVEMENTS
- * ============================================================================
- *
- * 1. Defensive `RouteURL.build` Hydration Guard
- *    - Updated `RouteURL.build()` to verify that every template variable in
- *      `this.variables` is not only an own property of `this.args`, but also
- *      strictly non-null and non-undefined (`this.args[varName] !== undefined &&
- *      this.args[varName] !== null`).
- *    - Prevents unhydrated route arguments from constructing invalid URLs like
- *      `"https://undefined/library/sections..."`.
- *
- * 2. Declarative DOM Builder & Fluent Manipulation Helpers on `DOMValue`
- *    - Added static `DOMValue.create(tag, options)` factory supporting
- *      `{ className, id, text, html, css, attrs, on, children, parent }` and
- *      returning a `DOMValue` instance.
- *    - Added chainable DOM manipulation methods directly to `DOMValue` so
- *      `Page.process()` methods can build and mutate UI without manual DOM
- *      boilerplate:
- *      - `.css(styles)`: applies inline CSS strings or style objects.
- *      - `.attr(nameOrObj, val)`: gets or sets element attributes.
- *      - `.on(event, handler, options)`: attaches event listeners.
- *      - `.append(...children)` / `.appendTo(parent)`: mounts child or parent
- *        nodes (accepting raw `HTMLElement`s, `DOMValue`s, or strings).
- *      - `.wrap(wrapperTag, styles)`: wraps the element in a container node.
- *      - `.linkify(href, attrs)`: idempotently wraps the element in an `<a>`
- *        tag if not already linked.
- *      - `.badge(htmlString, position, customStyles)`: wraps the element in a
- *        relative inline-block container (if needed) and injects a positioned
- *        overlay badge (`"top-left"`, `"bottom-left"`, `"top-right"`,
- *        `"bottom-right"`, or custom coordinates).
- *
- * 3. Declarative `Page` Lifecycle Enhancements
- *    - Declarative `schema` / `structure`:
- *      Pages can declare `schema: { ... }` (or `structure: { ... }`) at the
- *      class or instance level; `Page.prototype.scrape()` automatically
- *      instantiates the appropriate `Extractor` (`DOMExtractor` or
- *      `JSONExtractor`), populates `this.scraps` and `this.data`, and applies
- *      any `namespace` wrapper without requiring a custom `scrape()` method.
- *    - Declarative `providers` & Auto-Dependency Resolution (`resolveProviders`):
- *      Pages (and base classes like `Plex` or `TMDB`) can declare a `providers`
- *      map to resolve route template variables (`${serverUrl}`, `${plexToken}`,
- *      `${librarySection}`, `${machineIdentifier}`, `${tmdbKey}`) automatically
- *      before `fetch()`, `scrape()`, and `extract()`.
- *    - Multi-Candidate Fallback Chains in `enrichWith` & Declarative `enrichers`:
- *      `this.enrichWith(key, PageClassOrCandidates, argsBuilder, validatorFn)`
- *      accepts an array of fallback candidates, skipping candidates with
- *      missing arguments or empty extracted payloads.
- *    - Concurrency Limiting & Automatic Retry (`_networkFetch`):
- *      Added configurable `Page.maxConcurrent` (default `8`) semaphore queuing
- *      and automatic retry on transient network failures or `HTTP 429/502/503/504`.
- *    - Deduplicated CSS Injection (`Page.addStyle` & `css` property):
- *      Added `Page.addStyle(cssText)` (backed by `Page._injectedStyles`) and
- *      automatic injection of any `css` property during `before.process`.
- * ============================================================================
- */
-
 /* global unsafeWindow Ouro Extension Class Trait globalThis GM_xmlhttpRequest GM_addStyle */
-// START SCRAPER EXTENSION
 Ouro.pageSystemExtension = new Extension(
     "Page System",
     "Comprehensive scraping and routing framework built on top of Ouro classes, traits, and native wrappers.",
@@ -133,7 +69,8 @@ Ouro.pageSystemExtension = new Extension(
 
                 // Pre-compile all strings into RegExp objects immediately
                 this._providedPatterns = matchPatterns.map((pat) => {
-                    if (pat instanceof RegExp || typeof pat === "function") return pat;
+                    if (pat instanceof RegExp || typeof pat === "function")
+                        return pat;
 
                     if (typeof pat === "string") {
                         if (pat.includes("*")) {
@@ -142,7 +79,10 @@ Ouro.pageSystemExtension = new Extension(
                                 .replace(/\*/g, ".*");
                             return new RegExp(`^${regexStr}$`, "i");
                         } else {
-                            const escaped = pat.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                            const escaped = pat.replace(
+                                /[.*+?^${}()|[\]\\]/g,
+                                "\\$&",
+                            );
                             return new RegExp(escaped, "i");
                         }
                     }
@@ -156,12 +96,19 @@ Ouro.pageSystemExtension = new Extension(
             build: function () {
                 const hasAllVariables = this.variables.every(
                     (varName) =>
-                        Object.prototype.hasOwnProperty.call(this.args, varName) &&
+                        Object.prototype.hasOwnProperty.call(
+                            this.args,
+                            varName,
+                        ) &&
                         this.args[varName] !== undefined &&
                         this.args[varName] !== null,
                 );
 
-                if (!hasAllVariables || !this.builder || this.builder === "no route") {
+                if (
+                    !hasAllVariables ||
+                    !this.builder ||
+                    this.builder === "no route"
+                ) {
                     this._nativeObject = undefined;
                     return;
                 }
@@ -170,7 +117,9 @@ Ouro.pageSystemExtension = new Extension(
                     let actualUrl = this.builder;
                     for (const varName of this.variables) {
                         const rawValue = this.args[varName];
-                        actualUrl = actualUrl.split(`\${${varName}}`).join(rawValue);
+                        actualUrl = actualUrl
+                            .split(`\${${varName}}`)
+                            .join(rawValue);
                     }
                     this._nativeObject = new URL(actualUrl);
                 } catch (err) {
@@ -244,8 +193,13 @@ Ouro.pageSystemExtension = new Extension(
                         .map((part, i) => (i % 2 === 0 ? part : "([^/?#]+)"))
                         .join("");
 
-                    this.pattern = new RegExp(`${mappedRegex}(?:[?#].*)?$`, "i");
-                    this.patterns = [this.pattern].concat(this._providedPatterns || []);
+                    this.pattern = new RegExp(
+                        `${mappedRegex}(?:[?#].*)?$`,
+                        "i",
+                    );
+                    this.patterns = [this.pattern].concat(
+                        this._providedPatterns || [],
+                    );
 
                     this.build();
                 },
@@ -283,7 +237,9 @@ Ouro.pageSystemExtension = new Extension(
                         ? this._value(el)
                         : this._value;
                 }
-                return el ? (el.innerText || el.textContent || "").trim() : null;
+                return el
+                    ? (el.innerText || el.textContent || "").trim()
+                    : null;
             },
             set v(newVal) {
                 this._value = newVal;
@@ -300,18 +256,23 @@ Ouro.pageSystemExtension = new Extension(
                 },
                 create: function (tag = "div", options = {}) {
                     const el =
-                        typeof tag === "string" ? document.createElement(tag) : tag;
+                        typeof tag === "string"
+                            ? document.createElement(tag)
+                            : tag;
                     const wrapped = new this(el, options.value);
                     if (!el) return wrapped;
 
                     if (options.id) el.id = options.id;
                     if (options.className) el.className = options.className;
-                    if (options.text !== undefined) el.textContent = options.text;
+                    if (options.text !== undefined)
+                        el.textContent = options.text;
                     if (options.html !== undefined) el.innerHTML = options.html;
                     if (options.css) wrapped.css(options.css);
                     if (options.attrs) wrapped.attr(options.attrs);
                     if (options.on && typeof options.on === "object") {
-                        for (const [evt, handler] of Object.entries(options.on)) {
+                        for (const [evt, handler] of Object.entries(
+                            options.on,
+                        )) {
                             wrapped.on(evt, handler);
                         }
                     }
@@ -335,7 +296,8 @@ Ouro.pageSystemExtension = new Extension(
                 this._debug = debug;
 
                 this[Symbol.toPrimitive] = function (hint) {
-                    if (this._debug) console.debug("[Ouro — Page] HINT: ", hint);
+                    if (this._debug)
+                        console.debug("[Ouro — Page] HINT: ", hint);
                     const val = this._value;
 
                     if (val !== null && typeof val === "object") {
@@ -355,7 +317,10 @@ Ouro.pageSystemExtension = new Extension(
                     if (Array.isArray(item)) return item.map(unwrap);
                     if (item !== null && typeof item === "object") {
                         return Object.fromEntries(
-                            Object.entries(item).map(([k, v]) => [k, unwrap(v)]),
+                            Object.entries(item).map(([k, v]) => [
+                                k,
+                                unwrap(v),
+                            ]),
                         );
                     }
                     return item;
@@ -373,7 +338,9 @@ Ouro.pageSystemExtension = new Extension(
             },
             valueOf: function () {
                 const val = this._value;
-                return val !== null && typeof val === "object" ? val : Number(val);
+                return val !== null && typeof val === "object"
+                    ? val
+                    : Number(val);
             },
             css: function (styles) {
                 const el = this.element();
@@ -393,7 +360,9 @@ Ouro.pageSystemExtension = new Extension(
                         ? undefined
                         : this;
                 if (rest.length === 0 && typeof nameOrObj === "string") {
-                    return el.getAttribute ? el.getAttribute(nameOrObj) : el[nameOrObj];
+                    return el.getAttribute
+                        ? el.getAttribute(nameOrObj)
+                        : el[nameOrObj];
                 }
                 if (typeof nameOrObj === "string") {
                     if (val === null || val === undefined) {
@@ -405,7 +374,8 @@ Ouro.pageSystemExtension = new Extension(
                     }
                 } else if (nameOrObj && typeof nameOrObj === "object") {
                     for (const [k, v] of Object.entries(nameOrObj)) {
-                        if (v === null || v === undefined) el.removeAttribute?.(k);
+                        if (v === null || v === undefined)
+                            el.removeAttribute?.(k);
                         else if (el.setAttribute) el.setAttribute(k, v);
                         else el[k] = v;
                     }
@@ -414,7 +384,11 @@ Ouro.pageSystemExtension = new Extension(
             },
             on: function (event, handler, options = undefined) {
                 const el = this.element();
-                if (el && typeof el.addEventListener === "function" && typeof handler === "function") {
+                if (
+                    el &&
+                    typeof el.addEventListener === "function" &&
+                    typeof handler === "function"
+                ) {
                     el.addEventListener(event, handler, options);
                 }
                 return this;
@@ -467,12 +441,19 @@ Ouro.pageSystemExtension = new Extension(
                 }
                 return this;
             },
-            badge: function (htmlString, position = "top-left", customStyles = {}) {
+            badge: function (
+                htmlString,
+                position = "top-left",
+                customStyles = {},
+            ) {
                 const el = this.element();
                 if (!el || !htmlString || !el.parentNode) return null;
 
                 let wrapper = el.parentElement;
-                if (!wrapper || !wrapper.classList.contains("ouro-badge-wrapper")) {
+                if (
+                    !wrapper ||
+                    !wrapper.classList.contains("ouro-badge-wrapper")
+                ) {
                     wrapper = document.createElement("div");
                     wrapper.className = "ouro-badge-wrapper";
                     Object.assign(wrapper.style, {
@@ -549,7 +530,10 @@ Ouro.pageSystemExtension = new Extension(
                     if (Array.isArray(item)) return item.map(unwrap);
                     if (item !== null && typeof item === "object") {
                         return Object.fromEntries(
-                            Object.entries(item).map(([k, v]) => [k, unwrap(v)]),
+                            Object.entries(item).map(([k, v]) => [
+                                k,
+                                unwrap(v),
+                            ]),
                         );
                     }
                     return item;
@@ -588,17 +572,37 @@ Ouro.pageSystemExtension = new Extension(
                         const inner = spec[0];
                         if (spec.length === 1) {
                             if (typeof inner === "string") {
-                                [mode, selector, extractor] = ["all_", inner, null];
-                            } else if (Array.isArray(inner) && inner.length === 2) {
-                                [mode, selector, extractor] = ["all_", ...inner];
-                            } else if (typeof inner === "object" && inner !== null) {
-                                [mode, selector, extractor] = ["first_", ".", inner];
+                                [mode, selector, extractor] = [
+                                    "all_",
+                                    inner,
+                                    null,
+                                ];
+                            } else if (
+                                Array.isArray(inner) &&
+                                inner.length === 2
+                            ) {
+                                [mode, selector, extractor] = [
+                                    "all_",
+                                    ...inner,
+                                ];
+                            } else if (
+                                typeof inner === "object" &&
+                                inner !== null
+                            ) {
+                                [mode, selector, extractor] = [
+                                    "first_",
+                                    ".",
+                                    inner,
+                                ];
                             }
                         } else if (spec.length === 2) {
                             if (spec[0] === "all_" || spec[0] === "first_") {
                                 [mode, selector, extractor] = [...spec, null];
                             } else if (typeof spec[0] === "string") {
-                                [mode, selector, extractor] = ["first_", ...spec];
+                                [mode, selector, extractor] = [
+                                    "first_",
+                                    ...spec,
+                                ];
                             } else {
                                 throw new Error(
                                     `Unrecognized 2-element spec: ${JSON.stringify(spec)}`,
@@ -618,7 +622,9 @@ Ouro.pageSystemExtension = new Extension(
                         }
                         return out;
                     } else {
-                        throw new Error(`Invalid spec: ${JSON.stringify(spec)}`);
+                        throw new Error(
+                            `Invalid spec: ${JSON.stringify(spec)}`,
+                        );
                     }
 
                     if (extractor !== null && typeof extractor === "object") {
@@ -670,7 +676,10 @@ Ouro.pageSystemExtension = new Extension(
                                 result,
                                 activeContext,
                             );
-                            if (this.scraps && typeof this.scraps === "object") {
+                            if (
+                                this.scraps &&
+                                typeof this.scraps === "object"
+                            ) {
                                 this.scraps[key] = result[key];
                             }
                         }
@@ -684,11 +693,18 @@ Ouro.pageSystemExtension = new Extension(
                         if (extractor === null) return new DOMValue(el);
 
                         if (typeof extractor === "function") {
-                            const val = extractor.call(this, el, resultAcc, activeContext);
+                            const val = extractor.call(
+                                this,
+                                el,
+                                resultAcc,
+                                activeContext,
+                            );
                             return new DOMValue(el, val);
                         }
                         if (typeof extractor === "string") {
-                            const attr = el.getAttribute ? el.getAttribute(extractor) : null;
+                            const attr = el.getAttribute
+                                ? el.getAttribute(extractor)
+                                : null;
                             const val = attr !== null ? attr : el[extractor];
                             return new DOMValue(el, val);
                         }
@@ -715,9 +731,14 @@ Ouro.pageSystemExtension = new Extension(
                               ? context?.parentElement
                               : mode === "first_"
                                 ? context.querySelector(selector)
-                                : Array.from(context.querySelectorAll(selector));
+                                : Array.from(
+                                      context.querySelectorAll(selector),
+                                  );
 
-                    if (!elements || (Array.isArray(elements) && elements.length === 0)) {
+                    if (
+                        !elements ||
+                        (Array.isArray(elements) && elements.length === 0)
+                    ) {
                         return undefined;
                     }
 
@@ -739,7 +760,8 @@ Ouro.pageSystemExtension = new Extension(
                     if (!obj || !path) {
                         return { parent: null, key: null, value: undefined };
                     }
-                    if (path === ".") return { parent: null, key: null, value: obj };
+                    if (path === ".")
+                        return { parent: null, key: null, value: obj };
 
                     if (typeof path !== "string") {
                         return { parent: null, key: null, value: undefined };
@@ -776,10 +798,15 @@ Ouro.pageSystemExtension = new Extension(
                         };
                     }
 
-                    let deepResult = { parent: null, key: null, value: undefined };
+                    let deepResult = {
+                        parent: null,
+                        key: null,
+                        value: undefined,
+                    };
 
                     const search = (currentObj) => {
-                        if (!currentObj || typeof currentObj !== "object") return false;
+                        if (!currentObj || typeof currentObj !== "object")
+                            return false;
 
                         const res = strictEval(currentObj);
                         if (res.found) {
@@ -806,7 +833,12 @@ Ouro.pageSystemExtension = new Extension(
                 if (!force && this.scraps) return this.scraps;
 
                 this.scraps = {};
-                this.scraps = this._extractSpec(this.spec, doc, this.scraps, context);
+                this.scraps = this._extractSpec(
+                    this.spec,
+                    doc,
+                    this.scraps,
+                    context,
+                );
 
                 return this.scraps;
             },
@@ -823,8 +855,16 @@ Ouro.pageSystemExtension = new Extension(
                     if (typeof spec === "object" && !Array.isArray(spec)) {
                         const res = {};
                         for (const [k, v] of Object.entries(spec)) {
-                            res[k] = this._extractSpec(v, context, res, activeContext);
-                            if (this.scraps && typeof this.scraps === "object") {
+                            res[k] = this._extractSpec(
+                                v,
+                                context,
+                                res,
+                                activeContext,
+                            );
+                            if (
+                                this.scraps &&
+                                typeof this.scraps === "object"
+                            ) {
                                 this.scraps[k] = res[k];
                             }
                         }
@@ -847,33 +887,57 @@ Ouro.pageSystemExtension = new Extension(
                             if (spec.length > 1) extractor = spec[1];
                         } else {
                             return spec.map((item) =>
-                                this._extractSpec(item, context, resultAcc, activeContext),
+                                this._extractSpec(
+                                    item,
+                                    context,
+                                    resultAcc,
+                                    activeContext,
+                                ),
                             );
                         }
                     }
 
-                    const targetNode = JSONExtractor.resolvePointer(context, path).value;
+                    const targetNode = JSONExtractor.resolvePointer(
+                        context,
+                        path,
+                    ).value;
 
                     const applyExtractor = (node, ext) => {
                         if (node === undefined) return undefined;
                         if (ext === null || ext === undefined) return node;
 
                         if (typeof ext === "function") {
-                            return ext.call(this, node, resultAcc, activeContext);
+                            return ext.call(
+                                this,
+                                node,
+                                resultAcc,
+                                activeContext,
+                            );
                         }
                         if (typeof ext === "string") {
-                            return JSONExtractor.resolvePointer(node, ext).value;
+                            return JSONExtractor.resolvePointer(node, ext)
+                                .value;
                         }
                         if (typeof ext === "object") {
-                            return this._extractSpec(ext, node, resultAcc, activeContext);
+                            return this._extractSpec(
+                                ext,
+                                node,
+                                resultAcc,
+                                activeContext,
+                            );
                         }
                         return node;
                     };
 
                     if (isListSpec) {
-                        if (targetNode === undefined || targetNode === null) return [];
-                        const arr = Array.isArray(targetNode) ? targetNode : [targetNode];
-                        return arr.map((item) => applyExtractor(item, extractor));
+                        if (targetNode === undefined || targetNode === null)
+                            return [];
+                        const arr = Array.isArray(targetNode)
+                            ? targetNode
+                            : [targetNode];
+                        return arr.map((item) =>
+                            applyExtractor(item, extractor),
+                        );
                     } else {
                         return applyExtractor(targetNode, extractor);
                     }
@@ -919,7 +983,10 @@ Ouro.pageSystemExtension = new Extension(
                         const next = Page._requestQueue.shift();
                         next();
                     } else {
-                        Page._activeRequests = Math.max(0, Page._activeRequests - 1);
+                        Page._activeRequests = Math.max(
+                            0,
+                            Page._activeRequests - 1,
+                        );
                     }
                 },
                 addStyle(cssText) {
@@ -932,7 +999,9 @@ Ouro.pageSystemExtension = new Extension(
                         const style = document.createElement("style");
                         style.type = "text/css";
                         style.textContent = cssText;
-                        (document.head || document.documentElement)?.appendChild(style);
+                        (
+                            document.head || document.documentElement
+                        )?.appendChild(style);
                     }
                 },
                 showToast(message, duration = 0, ...otherStuff) {
@@ -981,7 +1050,9 @@ Ouro.pageSystemExtension = new Extension(
                     Page.registry.push(newSubclass);
 
                     const rt = newSubclass.routeTemplate;
-                    const templateStr = Array.isArray(rt) ? rt[0] : rt || "no route";
+                    const templateStr = Array.isArray(rt)
+                        ? rt[0]
+                        : rt || "no route";
                     const aliases =
                         Array.isArray(rt) && rt[2]
                             ? Array.isArray(rt[2])
@@ -990,7 +1061,10 @@ Ouro.pageSystemExtension = new Extension(
                             : [];
 
                     const combinedPatterns = [];
-                    if (templateStr !== "no route" && templateStr !== "${pageurl}") {
+                    if (
+                        templateStr !== "no route" &&
+                        templateStr !== "${pageurl}"
+                    ) {
                         combinedPatterns.push(templateStr);
                     }
                     combinedPatterns.push(
@@ -998,13 +1072,17 @@ Ouro.pageSystemExtension = new Extension(
                     );
 
                     if (combinedPatterns.length > 0) {
-                        console.info(`[Ouro — Page] New Page Type: ${newSubclass.name}`);
+                        console.info(
+                            `[Ouro — Page] New Page Type: ${newSubclass.name}`,
+                        );
                         combinedPatterns.forEach((pattern) => {
                             let matchStr = pattern.replace(/\$\{(.+?)\}/g, "*");
                             if (!matchStr.includes("://")) {
                                 matchStr = `*://${matchStr}`;
                             }
-                            console.info(`[Ouro — Page] // @match        ${matchStr}`);
+                            console.info(
+                                `[Ouro — Page] // @match        ${matchStr}`,
+                            );
                         });
                     }
 
@@ -1014,23 +1092,36 @@ Ouro.pageSystemExtension = new Extension(
                     const subclasses = Page.registry;
 
                     const matchedRoutes = subclasses
-                        .filter((Subclass) => Subclass && Subclass.routeTemplate)
+                        .filter(
+                            (Subclass) => Subclass && Subclass.routeTemplate,
+                        )
                         .map((Subclass) => {
-                            const routeMatcher = new RouteURL(Subclass.routeTemplate);
+                            const routeMatcher = new RouteURL(
+                                Subclass.routeTemplate,
+                            );
                             const extractedArgs = routeMatcher.match(urlStr);
 
                             if (extractedArgs === null) return null;
 
                             routeMatcher.args = extractedArgs;
 
-                            const templateStr = Array.isArray(Subclass.routeTemplate)
+                            const templateStr = Array.isArray(
+                                Subclass.routeTemplate,
+                            )
                                 ? Subclass.routeTemplate[0]
                                 : Subclass.routeTemplate || "";
 
-                            const literalPattern = templateStr.replace(/\$\{[^}]+\}/g, "");
+                            const literalPattern = templateStr.replace(
+                                /\$\{[^}]+\}/g,
+                                "",
+                            );
                             const specificityScore = literalPattern.length;
 
-                            return { Subclass, routeMatcher, score: specificityScore };
+                            return {
+                                Subclass,
+                                routeMatcher,
+                                score: specificityScore,
+                            };
                         })
                         .filter((match) => match !== null);
 
@@ -1038,8 +1129,13 @@ Ouro.pageSystemExtension = new Extension(
 
                     if (matchedRoutes.length > 0) {
                         const best = matchedRoutes[0];
-                        Page.showToast(`Matched "${best.Subclass.name}" (${best.score})`);
-                        return { Subclass: best.Subclass, routeMatcher: best.routeMatcher };
+                        Page.showToast(
+                            `Matched "${best.Subclass.name}" (${best.score})`,
+                        );
+                        return {
+                            Subclass: best.Subclass,
+                            routeMatcher: best.routeMatcher,
+                        };
                     }
 
                     return {
@@ -1121,7 +1217,9 @@ Ouro.pageSystemExtension = new Extension(
                 if (this[propName] && typeof this[propName] === "object") {
                     lineage.push(this[propName]);
                 }
-                return lineage.length > 0 ? Object.assign({}, ...lineage) : null;
+                return lineage.length > 0
+                    ? Object.assign({}, ...lineage)
+                    : null;
             },
 
             async resolveProviders() {
@@ -1184,13 +1282,20 @@ Ouro.pageSystemExtension = new Extension(
                     if (Array.isArray(provider)) {
                         const [getterFn, actionOrPage] = provider;
                         const resolvedAction =
-                            typeof actionOrPage === "function" && !actionOrPage.__meta
+                            typeof actionOrPage === "function" &&
+                            !actionOrPage.__meta
                                 ? actionOrPage()
                                 : actionOrPage;
                         await this.ensure(getterFn, resolvedAction);
-                        this.route.args[varName] = getterFn.call(this, this.data);
+                        this.route.args[varName] = getterFn.call(
+                            this,
+                            this.data,
+                        );
                     } else if (typeof provider === "function") {
-                        this.route.args[varName] = await provider.call(this, this.data);
+                        this.route.args[varName] = await provider.call(
+                            this,
+                            this.data,
+                        );
                     } else {
                         this.route.args[varName] = provider;
                     }
@@ -1209,7 +1314,9 @@ Ouro.pageSystemExtension = new Extension(
                     !isString && input && input.args ? input.args : null;
 
                 const rt = this.constructor.routeTemplate;
-                this.route = Array.isArray(rt) ? new RouteURL(...rt) : new RouteURL(rt);
+                this.route = Array.isArray(rt)
+                    ? new RouteURL(...rt)
+                    : new RouteURL(rt);
 
                 if (isString) {
                     const extractedArgs = this.route.match(urlStr);
@@ -1233,8 +1340,10 @@ Ouro.pageSystemExtension = new Extension(
                 return (this.request ??= new Request(...args));
             },
             async _networkFetch(req) {
-                const maxRetries = this.constructor.retries ?? Page.retries ?? 1;
-                const delayMs = this.constructor.retryDelay ?? Page.retryDelay ?? 300;
+                const maxRetries =
+                    this.constructor.retries ?? Page.retries ?? 1;
+                const delayMs =
+                    this.constructor.retryDelay ?? Page.retryDelay ?? 300;
                 const useGM = typeof GM_xmlhttpRequest !== "undefined";
 
                 const performOnce = () => {
@@ -1250,12 +1359,18 @@ Ouro.pageSystemExtension = new Extension(
                                 headers: headersObj,
                                 onload: (res) =>
                                     resolve({
-                                        ok: res.status >= 200 && res.status < 300,
+                                        ok:
+                                            res.status >= 200 &&
+                                            res.status < 300,
                                         status: res.status,
                                         text: async () => res.responseText,
                                     }),
                                 onerror: (err) =>
-                                    reject(new Error(err.error || "GM network error")),
+                                    reject(
+                                        new Error(
+                                            err.error || "GM network error",
+                                        ),
+                                    ),
                             });
                         });
                     }
@@ -1273,14 +1388,18 @@ Ouro.pageSystemExtension = new Extension(
                                 attempt < maxRetries
                             ) {
                                 attempt++;
-                                await new Promise((r) => setTimeout(r, delayMs * attempt));
+                                await new Promise((r) =>
+                                    setTimeout(r, delayMs * attempt),
+                                );
                                 continue;
                             }
                             return res;
                         } catch (err) {
                             if (attempt < maxRetries) {
                                 attempt++;
-                                await new Promise((r) => setTimeout(r, delayMs * attempt));
+                                await new Promise((r) =>
+                                    setTimeout(r, delayMs * attempt),
+                                );
                                 continue;
                             }
                             throw err;
@@ -1337,7 +1456,10 @@ Ouro.pageSystemExtension = new Extension(
                     const observeRoot = targetDocument.body
                         ? targetDocument.body
                         : targetDocument;
-                    observer.observe(observeRoot, { childList: true, subtree: true });
+                    observer.observe(observeRoot, {
+                        childList: true,
+                        subtree: true,
+                    });
 
                     setTimeout(() => {
                         observer.disconnect();
@@ -1373,10 +1495,11 @@ Ouro.pageSystemExtension = new Extension(
                         this.contentType.includes("json")
                     ) {
                         if (window.location.protocol === "file:") {
-                            this.rawText = document.documentElement.textContent.replace(
-                                /JSONPage.+/,
-                                "",
-                            );
+                            this.rawText =
+                                document.documentElement.textContent.replace(
+                                    /JSONPage.+/,
+                                    "",
+                                );
                         } else {
                             const res = await fetch(window.location.href);
                             this.rawText = await res.text();
@@ -1407,7 +1530,8 @@ Ouro.pageSystemExtension = new Extension(
                     this.structure ||
                     this.constructor.schema ||
                     this.constructor.structure;
-                if (!this.content || !this.extractor || !spec) return (this.data = {});
+                if (!this.content || !this.extractor || !spec)
+                    return (this.data = {});
                 try {
                     const extractor = new this.extractor(spec);
                     const targetDoc =
@@ -1428,8 +1552,10 @@ Ouro.pageSystemExtension = new Extension(
                 const [argsBuilder, validatorFn] = rest;
                 if (Array.isArray(PageClass)) {
                     for (const candidate of PageClass) {
-                        if (!Array.isArray(candidate) || !candidate[0]) continue;
-                        const [CandPage, candArgsBuilder, candValidator] = candidate;
+                        if (!Array.isArray(candidate) || !candidate[0])
+                            continue;
+                        const [CandPage, candArgsBuilder, candValidator] =
+                            candidate;
                         const rawArgs =
                             typeof candArgsBuilder === "function"
                                 ? candArgsBuilder.call(this, this.data)
@@ -1439,21 +1565,27 @@ Ouro.pageSystemExtension = new Extension(
                         if (
                             typeof rawArgs === "object" &&
                             Object.values(rawArgs).some(
-                                (v) => v === undefined || v === null || v === "",
+                                (v) =>
+                                    v === undefined || v === null || v === "",
                             )
                         ) {
                             continue;
                         }
 
                         const payload =
-                            typeof rawArgs === "string" ? rawArgs : { args: rawArgs };
-                        const extracted = (await CandPage.extract(payload))?.data;
+                            typeof rawArgs === "string"
+                                ? rawArgs
+                                : { args: rawArgs };
+                        const extracted = (await CandPage.extract(payload))
+                            ?.data;
                         const isValid = candValidator
                             ? candValidator(extracted)
                             : Boolean(
                                   extracted &&
-                                      typeof extracted === "object" &&
-                                      Object.keys(extracted).some((k) => k !== "dataStatus"),
+                                  typeof extracted === "object" &&
+                                  Object.keys(extracted).some(
+                                      (k) => k !== "dataStatus",
+                                  ),
                               );
 
                         if (isValid) {
@@ -1506,7 +1638,10 @@ Ouro.pageSystemExtension = new Extension(
                 },
                 async extract() {
                     await this.resolveProviders();
-                    await this.ensure(() => this.data?.dataStatus >= 2, this.scrape);
+                    await this.ensure(
+                        () => this.data?.dataStatus >= 2,
+                        this.scrape,
+                    );
                     const ns = this.namespace || this.constructor.namespace;
                     if (
                         ns &&
@@ -1520,20 +1655,34 @@ Ouro.pageSystemExtension = new Extension(
                     }
                 },
                 async enrich() {
-                    await this.ensure(() => this.data?.dataStatus >= 3, this.extract);
-                    const mergedEnrichers = this._collectLineageMap("enrichers");
+                    await this.ensure(
+                        () => this.data?.dataStatus >= 3,
+                        this.extract,
+                    );
+                    const mergedEnrichers =
+                        this._collectLineageMap("enrichers");
                     if (mergedEnrichers) {
-                        for (const [key, spec] of Object.entries(mergedEnrichers)) {
+                        for (const [key, spec] of Object.entries(
+                            mergedEnrichers,
+                        )) {
                             if (Array.isArray(spec) && Array.isArray(spec[0])) {
                                 await this.enrichWith(key, spec);
                             } else if (Array.isArray(spec)) {
-                                await this.enrichWith(key, spec[0], spec[1], spec[2]);
+                                await this.enrichWith(
+                                    key,
+                                    spec[0],
+                                    spec[1],
+                                    spec[2],
+                                );
                             }
                         }
                     }
                 },
                 async process() {
-                    await this.ensure(() => this.data?.dataStatus >= 4, this.enrich);
+                    await this.ensure(
+                        () => this.data?.dataStatus >= 4,
+                        this.enrich,
+                    );
                     const cssText = this.css || this.constructor.css;
                     if (cssText) this.addStyle(cssText);
                 },
@@ -1557,7 +1706,10 @@ Ouro.pageSystemExtension = new Extension(
                         );
                     }
                     if (!this.data) this.data = {};
-                    this.data.dataStatus = Math.max(this.data.dataStatus || 0, 1);
+                    this.data.dataStatus = Math.max(
+                        this.data.dataStatus || 0,
+                        1,
+                    );
                     return this;
                 },
 
@@ -1594,7 +1746,9 @@ Ouro.pageSystemExtension = new Extension(
                         ns &&
                         this.data &&
                         typeof this.data === "object" &&
-                        Object.keys(this.data).some((k) => k !== "dataStatus") &&
+                        Object.keys(this.data).some(
+                            (k) => k !== "dataStatus",
+                        ) &&
                         !(ns in this.data)
                     ) {
                         this.data = { [ns]: this.data };
@@ -1604,7 +1758,10 @@ Ouro.pageSystemExtension = new Extension(
                 },
 
                 async extract(...args) {
-                    console.debug(`[Ouro - Extract] ${this.constructor.name}`, this);
+                    console.debug(
+                        `[Ouro - Extract] ${this.constructor.name}`,
+                        this,
+                    );
                     try {
                         const result = await this.inner(...args);
                         if (
@@ -1668,7 +1825,11 @@ Ouro.pageSystemExtension = new Extension(
                         );
                         throw err;
                     }
-                    Page.showToast(`Processed ${this.constructor.name}!`, 15000, this);
+                    Page.showToast(
+                        `Processed ${this.constructor.name}!`,
+                        15000,
+                        this,
+                    );
                     if (!this.data) this.data = {};
                     this.data.dataStatus = 5;
                     return this.data;
@@ -1700,8 +1861,12 @@ Ouro.pageSystemExtension = new Extension(
                     const flatten = (obj, prefix = "") => {
                         let result = {};
                         for (const key in obj) {
-                            if (Object.prototype.hasOwnProperty.call(obj, key)) {
-                                const newKey = prefix ? `${prefix}_${key}` : key;
+                            if (
+                                Object.prototype.hasOwnProperty.call(obj, key)
+                            ) {
+                                const newKey = prefix
+                                    ? `${prefix}_${key}`
+                                    : key;
                                 const val = obj[key];
 
                                 if (typeof val === "object" && val !== null) {
@@ -1715,7 +1880,9 @@ Ouro.pageSystemExtension = new Extension(
                     };
 
                     for (const key in this.data) {
-                        if (Object.prototype.hasOwnProperty.call(this.data, key)) {
+                        if (
+                            Object.prototype.hasOwnProperty.call(this.data, key)
+                        ) {
                             const value = this.data[key];
 
                             if (typeof value === "object" && value !== null) {
@@ -1741,7 +1908,9 @@ Ouro.pageSystemExtension = new Extension(
                     return (iniString + sections).trim();
                 }
 
-                throw new Error(`[Exportable] Unsupported format requested: ${format}`);
+                throw new Error(
+                    `[Exportable] Unsupported format requested: ${format}`,
+                );
             },
         });
 
@@ -1820,7 +1989,9 @@ Ouro.pageSystemExtension = new Extension(
                     (function () {
                         "use strict";
                         const HIGHLIGHT_MAP = {
-                            "https://formulae.brew.sh/api/formula/": [".versions.stable"],
+                            "https://formulae.brew.sh/api/formula/": [
+                                ".versions.stable",
+                            ],
                         };
 
                         function getActiveHighlightPaths() {
@@ -1839,9 +2010,14 @@ Ouro.pageSystemExtension = new Extension(
 
                         function buildTree(val, currentPath = []) {
                             const pathString =
-                                currentPath.length > 0 ? "." + currentPath.join(".") : "";
-                            const shouldHighlight = activePaths.includes(pathString);
-                            const highlightClass = shouldHighlight ? " json-highlighted" : "";
+                                currentPath.length > 0
+                                    ? "." + currentPath.join(".")
+                                    : "";
+                            const shouldHighlight =
+                                activePaths.includes(pathString);
+                            const highlightClass = shouldHighlight
+                                ? " json-highlighted"
+                                : "";
 
                             if (val === null) {
                                 return `<span class="json-null${highlightClass}">null</span>`;
@@ -1881,12 +2057,14 @@ Ouro.pageSystemExtension = new Extension(
                                     const nextPath = [...currentPath, key];
 
                                     if (!isArray) {
-                                        const keyPathString = "." + nextPath.join(".");
+                                        const keyPathString =
+                                            "." + nextPath.join(".");
                                         const isKeyHighlighted =
                                             activePaths.includes(keyPathString);
-                                        const keyHighlightClass = isKeyHighlighted
-                                            ? " json-highlighted-key"
-                                            : "";
+                                        const keyHighlightClass =
+                                            isKeyHighlighted
+                                                ? " json-highlighted-key"
+                                                : "";
 
                                         html += `<span class="json-key${keyHighlightClass}">"${key}"</span>: `;
                                     }
@@ -1894,7 +2072,8 @@ Ouro.pageSystemExtension = new Extension(
                                     html += buildTree(val[key], nextPath);
 
                                     if (index < keys.length - 1) {
-                                        html += '<span class="json-comma">,</span>';
+                                        html +=
+                                            '<span class="json-comma">,</span>';
                                     }
                                     html += `</div>`;
                                 });
@@ -1999,11 +2178,16 @@ Ouro.pageSystemExtension = new Extension(
             methods: {
                 formatContent(text) {
                     const parser = new DOMParser();
-                    const doc = parser.parseFromString(text, this.accept || "text/html");
+                    const doc = parser.parseFromString(
+                        text,
+                        this.accept || "text/html",
+                    );
 
                     const errorNode = doc.querySelector("parsererror");
                     if (errorNode) {
-                        throw new Error(`DOM Parsing Failed: ${errorNode.textContent}`);
+                        throw new Error(
+                            `DOM Parsing Failed: ${errorNode.textContent}`,
+                        );
                     }
 
                     return doc;
@@ -2071,4 +2255,3 @@ Ouro.pageSystemExtension = new Extension(
         Ouro.publish("HTMLPage", HTMLPage);
     },
 );
-// END SCRAPER EXTENSION
