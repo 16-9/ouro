@@ -70,7 +70,18 @@ globalThis.registerOuroTests = function () {
             try {
                 this.tests.forEach((t) => t.run());
                 this.rate = `${this.passed}/${this.executed}`;
-                console.log(`SUCCESS: ${this.rate}`);
+                const statusLabel = this.failed === 0 ? "SUCCESS" : "FAILED";
+                console.log(`${statusLabel}: ${this.rate}`);
+
+                if (typeof document !== "undefined") {
+                    const heading =
+                        document.getElementById(
+                            "UnitTests",
+                        )?.previousElementSibling;
+                    if (heading) {
+                        heading.textContent = `Unit Tests: ${statusLabel} ${this.rate}`;
+                    }
+                }
             } finally {
                 console.log = originalLog;
                 console.error = originalError;
