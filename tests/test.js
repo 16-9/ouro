@@ -2,105 +2,126 @@
 /* global Test Metaclass Class GenericFunction Trait Ouro clear */
 
 globalThis.registerOuroTests = function () {
-    // 1. Define Test Class Runner
-    globalThis.Test = class Test {
-        static tests = [];
-        static total = 0;
+    // 1. Define Test Class Runner as a first-class Ouro Class (#3)
+    globalThis.Test = Class({
+        name: "Test",
+        description: "Ouro Unit Test Runner and Assertion Metaobject.",
+        properties: {
+            public: {
+                class: {
+                    tests: [],
+                    total: 0,
+                    passed: 0,
+                    failed: 0,
+                    executed: 0,
+                    rate: "0/0",
+                    trace: "",
+                },
+                instance: {
+                    code: null,
+                    name: "",
+                    description: null,
+                    status: undefined,
+                    executed: false,
+                },
+            },
+        },
+        methods: {
+            public: {
+                instance: {
+                    initialize: function (arg = {}) {
+                        const {
+                            code,
+                            name = null,
+                            description = null,
+                        } = typeof arg === "function" ? { code: arg } : arg;
+                        this.code = code;
+                        this.name = name || `test${++this.constructor.total}`;
+                        this.description = description;
+                        this.status = undefined;
+                        this.executed = false;
+                        this.constructor.tests.push(this);
+                    },
+                    run: function () {
+                        try {
+                            this.executed = false;
+                            if (this.description) {
+                                console.info(this.description);
+                            }
+                            this.status = this.code();
+                        } catch (error) {
+                            console.error(
+                                `Test [${this.name}] threw an error:`,
+                                error.message,
+                            );
+                            this.status = false;
+                        }
+                        this.executed = true;
+                        if (this.status) {
+                            this.constructor.passed++;
+                        } else {
+                            this.constructor.failed++;
+                        }
+                        this.constructor.executed++;
+                        console.info(
+                            `${this.name}: ${this.status ? "PASS" : "FAIL"}\n\n`,
+                        );
+                        return this.status;
+                    },
+                },
+                class: {
+                    run: function () {
+                        const buffer = [];
+                        const originalLog = console.log;
+                        const originalError = console.error;
 
-        constructor(arg = {}) {
-            const {
-                code,
-                name = null,
-                description = null,
-            } = typeof arg === "function" ? { code: arg } : arg;
-            this.code = code;
-            this.name = name || `test${++this.constructor.total}`;
-            this.description = description;
-            this.status = undefined;
-            this.constructor.tests.push(this);
-        }
+                        console.log = (...args) => {
+                            buffer.push(args.join(" "));
+                            originalLog(...args);
+                        };
 
-        run() {
-            try {
-                this.executed = false;
-                if (this.description) {
-                    console.info(this.description);
-                }
-                this.status = this.code();
-            } catch (error) {
-                console.error(
-                    `Test [${this.name}] threw an error:`,
-                    error.message,
-                );
-                this.status = false;
-            }
-            this.executed = true;
-            if (this.status) {
-                this.constructor.passed++;
-            } else {
-                this.constructor.failed++;
-            }
-            this.constructor.executed++;
-            console.info(`${this.name}: ${this.status ? "PASS" : "FAIL"}\n\n`);
-            return this.status;
-        }
+                        console.error = (...args) => {
+                            buffer.push(args.join(" "));
+                            originalError(...args);
+                        };
 
-        static passed = 0;
-        static failed = 0;
-        static executed = 0;
-        static rate = "0/0";
-        static trace = "";
+                        this.reset();
+                        try {
+                            this.tests.forEach((t) => t.run());
+                            this.rate = `${this.passed}/${this.executed}`;
+                            const statusLabel =
+                                this.failed === 0 ? "SUCCESS" : "FAILED";
+                            console.log(`${statusLabel}: ${this.rate}`);
 
-        static run() {
-            const buffer = [];
-            const originalLog = console.log;
-            const originalError = console.error;
-
-            console.log = (...args) => {
-                buffer.push(args.join(" "));
-                originalLog(...args);
-            };
-
-            console.error = (...args) => {
-                buffer.push(args.join(" "));
-                originalError(...args);
-            };
-
-            this.reset();
-            try {
-                this.tests.forEach((t) => t.run());
-                this.rate = `${this.passed}/${this.executed}`;
-                const statusLabel = this.failed === 0 ? "SUCCESS" : "FAILED";
-                console.log(`${statusLabel}: ${this.rate}`);
-
-                if (typeof document !== "undefined") {
-                    const heading =
-                        document.getElementById(
-                            "UnitTests",
-                        )?.previousElementSibling;
-                    if (heading) {
-                        heading.textContent = `Unit Tests: ${statusLabel} ${this.rate}`;
-                    }
-                }
-            } finally {
-                console.log = originalLog;
-                console.error = originalError;
-            }
-            this.trace = buffer.join("\n");
-            return this.failed === 0;
-        }
-
-        static reset() {
-            this.passed = this.failed = this.executed = 0;
-            this.rate = "0/0";
-            this.trace = "";
-        }
-
-        static clear() {
-            this.tests = [];
-            this.reset();
-        }
-    };
+                            if (typeof document !== "undefined") {
+                                const heading =
+                                    document.getElementById(
+                                        "UnitTests",
+                                    )?.previousElementSibling;
+                                if (heading) {
+                                    heading.textContent = `Unit Tests: ${statusLabel} ${this.rate}`;
+                                }
+                            }
+                        } finally {
+                            console.log = originalLog;
+                            console.error = originalError;
+                        }
+                        this.trace = buffer.join("\n");
+                        return this.failed === 0;
+                    },
+                    reset: function () {
+                        this.passed = this.failed = this.executed = 0;
+                        this.rate = "0/0";
+                        this.trace = "";
+                    },
+                    clear: function () {
+                        this.tests = [];
+                        this.reset();
+                    },
+                },
+            },
+        },
+    });
 
     globalThis.runtests = function runtests() {
         if (typeof clear === "function") {
@@ -1997,6 +2018,592 @@ globalThis.registerOuroTests = function () {
             }
 
             return survivedInMethods;
+        },
+    });
+
+    new Test({
+        name: "TODO #2: Class.fromSample",
+        description:
+            "Generates a minimal Ouro class from a sample object with inferred defaults and preserveValues option.",
+        code: () => {
+            const sample = {
+                title: "Inception",
+                year: 2010,
+                tags: ["sci-fi"],
+                active: true,
+                label() {
+                    return `${this.title} (${this.year})`;
+                },
+            };
+            const Inferred = Class.fromSample(sample, "InferredMovie");
+            const m1 = new Inferred();
+            const m2 = new Inferred({ title: "Matrix", year: 1999 });
+            m1.tags.push("thriller");
+
+            const Preserved = Class.fromSample(sample, {
+                name: "PreservedMovie",
+                preserveValues: true,
+            });
+            const p1 = new Preserved();
+
+            return (
+                m1.title === "" &&
+                m1.year === 0 &&
+                m1.active === false &&
+                m2.tags.length === 0 &&
+                m2.label() === "Matrix (1999)" &&
+                p1.title === "Inception" &&
+                p1.year === 2010 &&
+                p1.tags[0] === "sci-fi"
+            );
+        },
+    });
+
+    new Test({
+        name: "TODO #3: Class.fromClass and Native ES6 Class kindOf Bridging",
+        description:
+            "Converts native ES6 classes via Class.fromClass and allows direct kindOf: NativeES6Class inheritance with inner() and instanceof.",
+        code: () => {
+            class ES6Vehicle {
+                static category = "transport";
+                static identify() {
+                    return "ES6Vehicle";
+                }
+                constructor(speed = 50) {
+                    this.speed = speed;
+                }
+                describe() {
+                    return `Speed: ${this.speed}`;
+                }
+            }
+
+            const ConvertedVehicle = Class.fromClass(ES6Vehicle, {
+                name: "ConvertedVehicle",
+                boost() {
+                    this.speed += 25;
+                    return this.speed;
+                },
+            });
+            const cv = new ConvertedVehicle(80);
+
+            const SportsCar = Class({
+                name: "SportsCar",
+                kindOf: ES6Vehicle,
+                describe() {
+                    return `${this.inner()} km/h`;
+                },
+            });
+            const sc = new SportsCar(120);
+
+            return (
+                Test.__meta?.name === "Test" &&
+                ConvertedVehicle.category === "transport" &&
+                ConvertedVehicle.identify() === "ES6Vehicle" &&
+                cv.boost() === 105 &&
+                cv instanceof ES6Vehicle &&
+                sc.describe() === "Speed: 120 km/h" &&
+                sc instanceof ES6Vehicle &&
+                SportsCar.kindOf(ES6Vehicle) &&
+                sc.isA(ES6Vehicle)
+            );
+        },
+    });
+
+    new Test({
+        name: "TODO #4 & #6: Dynamic addProperty, addMethod, and Lifecycle Advice",
+        description:
+            "Dynamically attaches singular/plural properties and methods and triggers GenericFunction lifecycle hooks.",
+        code: () => {
+            let propHookTriggered = false;
+            let methodHookTriggered = false;
+
+            const DynTarget = Class({ name: "DynTarget" });
+
+            GenericFunction.defmethod(
+                "addProperties",
+                [DynTarget],
+                function () {
+                    propHookTriggered = true;
+                },
+                "after",
+            );
+            GenericFunction.defmethod(
+                "addMethods",
+                [DynTarget],
+                function () {
+                    methodHookTriggered = true;
+                },
+                "after",
+            );
+
+            DynTarget.addProperty("score", 42);
+            DynTarget.addProperty("secretTag", "classified", {
+                private: true,
+            });
+            DynTarget.addMethod("reveal", function () {
+                return `${this. secretTag}:${this.score}`;
+            });
+
+            const inst = new DynTarget();
+            return (
+                propHookTriggered &&
+                methodHookTriggered &&
+                inst.score === 42 &&
+                inst.secretTag === undefined &&
+                inst.reveal() === "classified:42"
+            );
+        },
+    });
+
+    new Test({
+        name: "TODO #5: Raw Class Definition Preservation",
+        description:
+            "Preserves the un-normalized raw definition object in __private.class.definition and getDefinition().",
+        code: () => {
+            const RawBlueprintTest = Class({
+                name: "RawBlueprintTest",
+                flatProp: "hello",
+                flatMethod() {
+                    return this.flatProp;
+                },
+            });
+            const rawDef = RawBlueprintTest.getDefinition();
+            return (
+                rawDef &&
+                rawDef.flatProp === "hello" &&
+                typeof rawDef.flatMethod === "function" &&
+                rawDef.properties === undefined
+            );
+        },
+    });
+
+    new Test({
+        name: "TODO #7, #8, #9, #13, #17: Introspection, stringify, inspect, and audit",
+        description:
+            "Filters native noise in getProperties/getMethods, serializes blueprints/instances via stringify(), and inspects classes/instances.",
+        code: () => {
+            const ReflClass = Class({
+                name: "ReflClass",
+                description: "Reflective test class",
+                count: 5,
+                class: {
+                    versionTag: "1.0",
+                },
+                private: {
+                    token: "xyz",
+                },
+                increment() {
+                    this.count++;
+                    return this.count;
+                },
+            });
+
+            const pubProps = ReflClass.getProperties("public", "instance");
+            const classProps = ReflClass.getProperties("public", "class");
+            const privProps = ReflClass.getProperties("private", "instance");
+            const pubMethods = ReflClass.getMethods("public", "instance");
+
+            const inst = new ReflClass();
+            inst.increment();
+
+            const classCode = stringify(ReflClass);
+            const instJson = JSON.parse(stringify(inst));
+            const classInspect = inspect(ReflClass);
+            const instInspect = inst.inspect();
+            const auditReport = Ouro.audit();
+
+            return (
+                pubProps.count === 5 &&
+                !Object.prototype.hasOwnProperty.call(
+                    pubProps,
+                    "constructor",
+                ) &&
+                classProps.versionTag === "1.0" &&
+                !Object.prototype.hasOwnProperty.call(classProps, "length") &&
+                privProps.token === "xyz" &&
+                typeof pubMethods.increment === "function" &&
+                classCode.includes('name: "ReflClass"') &&
+                classCode.includes("increment:") &&
+                instJson.count === 6 &&
+                classInspect.class === "ReflClass" &&
+                instInspect.className === "ReflClass" &&
+                instInspect.publicProperties.count === 6 &&
+                !("versionTag" in instInspect.publicProperties) &&
+                instInspect.privateVault.token === "xyz" &&
+                Boolean(auditReport.classes.ReflClass)
+            );
+        },
+    });
+
+    new Test({
+        name: "TODO #10: Forward Declarations & Abstract Requirements (requires / Forward)",
+        description:
+            "Tracks forward-declared properties/methods via requires and Forward symbol until resolved by subclasses or dynamic addition.",
+        code: () => {
+            const AbstractStore = Class({
+                name: "AbstractStore",
+                requires: ["connect", "disconnect"],
+                endpoint: Forward,
+            });
+
+            const initiallyIncomplete =
+                !AbstractStore.isComplete() &&
+                AbstractStore.getForwardDeclarations().length === 3;
+
+            const ConcreteStore = Class({
+                name: "ConcreteStore",
+                kindOf: AbstractStore,
+                endpoint: "https://api.example.com",
+                connect() {
+                    return true;
+                },
+            });
+
+            const partiallyComplete =
+                !ConcreteStore.isComplete() &&
+                ConcreteStore.getForwardDeclarations().length === 1 &&
+                ConcreteStore.getForwardDeclarations()[0] === "disconnect";
+
+            ConcreteStore.addMethod("disconnect", () => true);
+            const finallyComplete = ConcreteStore.isComplete();
+
+            return (
+                initiallyIncomplete && partiallyComplete && finallyComplete
+            );
+        },
+    });
+
+    new Test({
+        name: "TODO #14: Vocabulary Aliasing via Ouro.extendVocabulary",
+        description:
+            "Supports custom vocabulary aliases (e.g. inheritsFrom, slots) while preserving default canonical keywords.",
+        code: () => {
+            Ouro.extendVocabulary("kindOf", "inheritsFrom");
+            Ouro.extendVocabulary("properties", "slots");
+
+            const BaseVocab = Class({
+                name: "BaseVocab",
+                slots: {
+                    baseVal: 10,
+                },
+            });
+
+            const SubVocab = Class({
+                name: "SubVocab",
+                inheritsFrom: BaseVocab,
+                slots: {
+                    subVal: 20,
+                },
+            });
+
+            const inst = new SubVocab();
+            return (
+                inst.baseVal === 10 &&
+                inst.subVal === 20 &&
+                SubVocab.kindOf(BaseVocab)
+            );
+        },
+    });
+
+    new Test({
+        name: "TODO #18: Classes Stored as Property Values",
+        description:
+            "Preserves Ouro and ES6 classes assigned to properties as property values rather than misclassifying them as methods.",
+        code: () => {
+            const HelperModel = Class({ name: "HelperModel" });
+            class NativeHelper {}
+
+            const ContainerModel = Class({
+                name: "ContainerModel",
+                modelClass: HelperModel,
+                nativeClass: NativeHelper,
+            });
+
+            const inst = new ContainerModel();
+            return (
+                inst.modelClass === HelperModel &&
+                inst.nativeClass === NativeHelper &&
+                ContainerModel.getMethods("public", "instance").modelClass ===
+                    undefined
+            );
+        },
+    });
+
+    new Test({
+        name: "Advanced Expansion: Faceted Slots & Multi-Dispatch Specificity",
+        description:
+            "Executes slot facets (transform, validate, onChange) and dispatches multi-argument GenericFunctions by specificity.",
+        code: () => {
+            let changeLog = null;
+            const FacetedUser = Class({
+                name: "FacetedUser",
+                age: 0,
+            });
+            FacetedUser.setSlotFacet("age", "transform", (v) => Math.round(v));
+            FacetedUser.setSlotFacet("age", "validate", (v) => v >= 0);
+            FacetedUser.setSlotFacet("age", "onChange", (next, prev) => {
+                changeLog = `${prev}->${next}`;
+            });
+
+            const u = new FacetedUser();
+            u.age = 25.6;
+            let rejectedNegative = false;
+            try {
+                u.age = -5;
+            } catch (_) {
+                rejectedNegative = true;
+            }
+
+            const Shape = Class({ name: "Shape" });
+            const Circle = Class({ name: "Circle", kindOf: Shape });
+            GenericFunction.defgeneric("intersect");
+            GenericFunction.defmethod(
+                "intersect",
+                [Circle, Circle],
+                () => "circle-circle",
+            );
+            // Registered AFTER [Circle, Circle] — less specific on 2nd arg!
+            GenericFunction.defmethod(
+                "intersect",
+                [Circle, Shape],
+                () => "circle-shape",
+            );
+
+            const c = new Circle();
+            const s = new Shape();
+            const r1 = GenericFunction.defgeneric("intersect").dispatch(c, c);
+            const r2 = GenericFunction.defgeneric("intersect").dispatch(c, s);
+
+            let computeCount = 0;
+            const InlineFacetClass = Class({
+                name: "InlineFacetClass",
+                publish: false,
+                class: {
+                    secretUrl: {
+                        init: undefined,
+                        ifNeeded: () => {
+                            computeCount++;
+                            return "https://plex.local/?X-Plex-Token=xyz789";
+                        },
+                    },
+                    token: facetted({
+                        init: undefined,
+                        ifNeeded() {
+                            return new URL(this.secretUrl).searchParams.get(
+                                "X-Plex-Token",
+                            );
+                        },
+                    }),
+                },
+                count: { init: 0, type: Number },
+            });
+            const fInst = new InlineFacetClass();
+            fInst.count = "42";
+
+            return (
+                u.age === 26 &&
+                changeLog === "0->26" &&
+                rejectedNegative &&
+                r1 === "circle-circle" &&
+                r2 === "circle-shape" &&
+                computeCount === 0 &&
+                InlineFacetClass.token === "xyz789" &&
+                InlineFacetClass.token === "xyz789" &&
+                computeCount === 1 &&
+                fInst.count === 42
+            );
+        },
+    });
+
+    new Test({
+        name: "Graph & Scraper Enhancements: Multi-key get, prune, relations, and schemaless JSONPage",
+        description:
+            "Verifies multi-key Graph.get(), secondaryKeys, prune(), cross-graph resolve(), and schemaless JSONPage.scrape().",
+        code: () => {
+            if (typeof Graph === "undefined") return true;
+
+            const ServerTestGraph = Class({
+                name: "ServerTestGraph",
+                kindOf: Graph,
+                class: {
+                    primaryKeys: ["server_id"],
+                },
+            });
+
+            const MovieTestGraph = Class({
+                name: "MovieTestGraph",
+                kindOf: Graph,
+                class: {
+                    primaryKeys: ["imdb_id", "tmdb_id"],
+                    secondaryKeys: ["plex_id"],
+                    relations: {
+                        server: {
+                            target: ServerTestGraph,
+                            foreignKey: "server_id",
+                            targetKey: "server_id",
+                        },
+                    },
+                },
+            });
+
+            ServerTestGraph.deleteAll();
+            MovieTestGraph.deleteAll();
+
+            ServerTestGraph.put({
+                server_id: "srv1",
+                name: "HomePlex",
+            });
+
+            MovieTestGraph.put({
+                imdb_id: "tt1375666",
+                tmdb_id: 27205,
+                plex_id: "px99",
+                server_id: "srv1",
+                res: "1080p",
+            });
+            MovieTestGraph.put({
+                imdb_id: "tt1375666",
+                plex_id: "px100",
+                server_id: "srv1",
+                res: "4K",
+            });
+
+            // Multi-key get where first key misses and second key hits
+            const found = MovieTestGraph.get({
+                imdb_id: "tt_missing",
+                plex_id: "px99",
+            });
+            const resolved = MovieTestGraph.resolve(
+                { imdb_id: "tt1375666" },
+                "server",
+            );
+
+            // Prune 1080p variant and verify secondary index px99 is cleaned up
+            MovieTestGraph.prune({ imdb_id: "tt1375666" }, { res: "1080p" });
+            const prunedLookup = MovieTestGraph.get({ plex_id: "px99" });
+            const remaining = MovieTestGraph.records({ imdb_id: "tt1375666" });
+
+            // Schemaless JSONPage scrape
+            const RawApiPage = JSONPage.register({
+                name: "rawApiTestPage",
+                class: { routeTemplate: "https://api.test.local/item/${id}" },
+            });
+            const apiInst = new RawApiPage({ id: 1 });
+            apiInst.content = { ok: true, id: 1 };
+            const primaryScrape = Page.getMethods("public", "instance").scrape;
+            const scraped = primaryScrape.call(apiInst);
+
+            // Reactive route.args auto-rebuilds route.href without manual route.build()
+            apiInst.route.args.id = 99;
+            const rebuiltHref = apiInst.route.href;
+
+            return (
+                found !== null &&
+                resolved.length === 2 &&
+                resolved[0].server?.variants?.[0]?.name === "HomePlex" &&
+                prunedLookup === null &&
+                remaining.length === 1 &&
+                remaining[0].res === "4K" &&
+                scraped.ok === true &&
+                scraped.id === 1 &&
+                rebuiltHref === "https://api.test.local/item/99"
+            );
+        },
+    });
+
+    new Test({
+        name: "TODO #19, #20, #21, #22, #23: Core Kernel Slimming & Extension Isolation",
+        description:
+            "Verifies that Method/GenericFunction/Metaclass reflection, instance/subclass tracking, and DevTools toString/inspect sugar live in extensions and Core operates cleanly when unloaded.",
+        code: () => {
+            const gf = GenericFunction.defgeneric("kernelSlimCheck");
+            GenericFunction.defmethod(
+                "kernelSlimCheck",
+                [Number],
+                (x) => x * 2,
+            );
+            const methodObj = gf.methods[0];
+
+            // 1. Verify extensions provide reflection and DevTools toString when loaded
+            const loadedChecks =
+                gf.getName() === "kernelSlimCheck" &&
+                Array.isArray(gf.getMethods()) &&
+                methodObj.getQualifier() === "primary" &&
+                methodObj.getSpecializers()[0] === Number &&
+                typeof methodObj.getBody() === "function" &&
+                gf.toString().includes("[GenericFunction: kernelSlimCheck()") &&
+                methodObj.toString().includes("[Method: :primary (Number)]") &&
+                Metaclass.toString().includes("ƒ <Metaclass> Class()");
+
+            // 2. Unload Introspection and DevTools extensions
+            Ouro.introspectionExtension.unload();
+            Ouro.devtoolsExtension.unload();
+
+            let unloadedChecks = false;
+            try {
+                const BareParent = Class({
+                    name: "BareParent",
+                    publish: false,
+                    val: { init: 10, type: Number },
+                    compute(n) {
+                        return this.val + n;
+                    },
+                });
+                const BareChild = Class({
+                    name: "BareChild",
+                    publish: false,
+                    kindOf: BareParent,
+                });
+                const bareInst = new BareChild();
+                bareInst.val = "15";
+
+                unloadedChecks =
+                    gf.getName === undefined &&
+                    gf.getMethods === undefined &&
+                    methodObj.getSpecializers === undefined &&
+                    methodObj.getQualifier === undefined &&
+                    methodObj.getBody === undefined &&
+                    !Object.prototype.hasOwnProperty.call(
+                        Metaclass.prototype,
+                        "toString",
+                    ) &&
+                    !Object.prototype.hasOwnProperty.call(
+                        GenericFunction.prototype,
+                        "toString",
+                    ) &&
+                    !Object.prototype.hasOwnProperty.call(
+                        Method.prototype,
+                        "toString",
+                    ) &&
+                    BareParent.__meta.subclasses === undefined &&
+                    BareChild.__meta.instances === undefined &&
+                    bareInst.toSnapshot === undefined &&
+                    bareInst.inspect === undefined &&
+                    bareInst.val === 15 &&
+                    bareInst.compute(5) === 20 &&
+                    gf.dispatch(21) === 42;
+            } finally {
+                // 3. Reload extensions and verify full restoration
+                Ouro.introspectionExtension.load();
+                Ouro.devtoolsExtension.load();
+            }
+
+            const RestoredClass = Class({
+                name: "RestoredClass",
+                publish: false,
+                tag: "restored",
+            });
+            const restoredInst = new RestoredClass();
+
+            const restoredChecks =
+                gf.getName() === "kernelSlimCheck" &&
+                methodObj.getQualifier() === "primary" &&
+                RestoredClass.getInstances().has(restoredInst) &&
+                restoredInst.toSnapshot().tag === "restored" &&
+                restoredInst.inspect().className === "RestoredClass" &&
+                RestoredClass.toString().includes("ƒ <RestoredClass> Class()");
+
+            return loadedChecks && unloadedChecks && restoredChecks;
         },
     });
 

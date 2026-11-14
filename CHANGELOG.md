@@ -6,12 +6,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.1.0] - 2026-11-13
+
+### Added
+
+- **KEE / CLOS-Inspired Declarative Faceted Slots (`src/ouro.js`):**
+    - Added `Ouro.Vocabulary.facets` (`Ouro.FacetVocabulary`) defining canonical facet keywords (`init`, `value`, `default`, `ifNeeded`, `transform`, `validate`, `onChange`, `type`).
+    - Added inline property facet syntax directly inside `Class` / `Trait` / `Page.register` definitions (`prop: { init, ifNeeded, transform, validate, onChange, type }`) alongside the explicit `facetted({...})` (and aliases `faceted`, `facet`) helper.
+    - Added `ifNeeded` lazy computation & memoization daemon on slot reads when a slot's value is `undefined`.
+    - Added `type` facet coercion and validation (`String`, `Number`, `Boolean`, `Array`, `Object`, or custom Ouro/ES6 classes) before `transform` and `validate`.
+    - Preserved slot facets across subclass inheritance (`kindOf`).
+- **Core MOP & Reflection Expansion (`src/ouro.js`):**
+    - Added `Ouro.audit()` inventory helper for `Class`, `Metaclass`, `Method`, and `GenericFunction`.
+    - Added `Class.fromSample` (`Ouro.fromSample`) and `Class.fromClass` (`Ouro.fromClass`) to convert sample objects and native ES6 classes into Ouro classes, plus direct `kindOf: NativeES6Class` inheritance support.
+    - Added singular `addProperty` and `addMethod` GenericFunctions on `Metaclass`, and upgraded `stringify`, `inspect`, `addProperties`, and `addMethods` to GenericFunctions.
+    - Added lifecycle `:after` hook support on `Class.forge`, `Metaclass.prototype.addMethod(s)`, and `Metaclass.prototype.addProperty(ies)`.
+    - Added `Ouro.Forward` symbol, `requires:` manifest tracking, `Class.getRequires()`, `Class.isAbstract()`, `Class.getDefinition()`, `Class.getNormalizedDefinition()`, `Class.getSlot()`, `Class.getSlotFacet()`, `Class.setSlotFacet()`, `Ouro.snapshot()`, and `Ouro.stringify()`.
+    - Added `Ouro.VocabularyAliases` and `Ouro.extendVocabulary(semanticKey, ...aliases)` in `Ouro.syntaxExtensions`.
+    - Enabled direct class references as property default values in `Ouro.normalizeMatrix` via `Ouro.isClassValue(val)` without requiring getter wrappers.
+    - Added automatic global publishing (`Ouro.publish`) when forging named `Class`, `Trait`, and `Page.register` definitions.
+- **Page & Graph Framework Enhancements (`src/scraper.js`, `src/graph.js`):**
+    - Made `RouteURL.args` a reactive facetted slot (`Proxy`) that automatically triggers `this.route.build()` on nested key mutation or reassignment.
+    - Promoted `Array.prototype.parallel`, `Page.processUrl`, `Page.watchSPA`, and `Page.start` into `src/scraper.js`.
+    - Added schemaless fallback in `JSONPage.prototype.scrape()` so JSON endpoints without a `schema` automatically populate `this.data = this.json`.
+    - Added `secondaryKeys`, `keyTypes` coercion, multi-key `Graph.prototype.get()`, `Graph.prototype.prune()`, and declarative `relations` linkage to `Graph` (`src/graph.js`).
+- **Userscript Sync Workflow (`src/userscripts/`):**
+    - Relocated `Ouro-based Movie Graphs - DEV.js` to `src/userscripts/` and added `src/userscripts/sync-prod.js` plus `main`-branch-gated Git hooks (`.git/hooks/pre-commit`, `.git/hooks/pre-merge-commit`, `.git/hooks/post-merge`) to keep `Ouro-based Movie Graphs - Prod.js` synchronized exclusively on `main`.
+
+### Changed
+
+- **Core Kernel Slimming & Extension Isolation (`src/ouro.js`):**
+    - Extracted `Method` reflection (`getSpecializers`, `getQualifier`, `getBody`) and `GenericFunction` reflection (`getMethods`, `getName`) out of the Core kernel and into `Ouro.introspectionExtension`.
+    - Consolidated custom `toString()` DevTools formatters for `Metaclass`, `GenericFunction`, and `Method` into `Ouro.devtoolsExtension`.
+    - Extracted active instance tracking (`__meta.instances`), subclass tracking (`__meta.subclasses`), and prototype `toSnapshot` / `inspect` helpers out of `Bootstrap.allocate` into `Ouro.introspectionExtension` and `Ouro.devtoolsExtension` via `Metaclass.bootstrap.allocateHooks` and `instantiateHooks`.
+- **Movie Userscript Modernization (`src/userscripts/Ouro-based Movie Graphs - DEV.js`):**
+    - Converted `TMDB.apiKey`, `Plex.infoXMLurl`, `Plex.token`, and `Plex.librarySection` into declarative `ifNeeded` facetted slots.
+    - Eliminated manual `this.route.build()` calls, redundant `const <Name> =` assignments, manual `Ouro.publish` calls, and inline SPA router boilerplate (replaced with `Page.start()`).
+    - Unified `structure` into `schema` across `Page.register` definitions and configured `keyTypes` on `MovieGraph` and `PlexRecord`.
+
+### Fixed
+
+- **Advised Faceted Slot Continuity (`src/ouro.js`):** Updated `convertPropertyIfNeeded` so advising a property with `:before`, `:after`, or `:around` preserves all slot facets (`ifNeeded`, `type`, `transform`, `validate`, `onChange`).
+- **Legacy Provider Compatibility (`src/scraper.js`):** Updated `Page.prototype.resolveProviders()` (`plexToken` provider) to read the `Plex.token` `ifNeeded` facet with safe fallback to `Plex.extractToken?.()`.
+
+---
+
 ## [2.0.0] - 2026-11-13
 
 ### Changed
 
 - **Modular Repository Architecture:** Migrated from standalone GitHub Gists (`Ouro_dev.js`, `Ouro_scraper.js`, `Ouro_graph.js`) into a unified repository layout (`src/ouro.js`, `src/scraper.js`, `src/graph.js`, `src/fragments.js`).
 - **Self-Bootstrapping Metaclass (`src/ouro.js`):** Consolidated duplicate property and method installation loops between Phase 2 bootstrap and Phase 4 MOP weaving into `Metaclass.forge` and `Metaclass.addMethods`, allowing `Metaclass` to bootstrap itself via `Metaclass.addMethods(metaDef.methods)`.
+- **Metaclass Reflection Extraction (`src/ouro.js`):** Extracted developer reflection and serialization helpers (`getSubclasses`, `getInstances`, `getBlueprint`, `getName`, `getKindOf`, `superclass`, `subclasses`, `toString`) out of the core `Metaclass` bootstrap and into `Ouro.introspectionExtension`.
 - **Fast-Path MOP Dispatch (`src/ouro.js`):** Refactored `GenericFunction.dispatch` to perform single-pass method categorization (`primaries`, `befores`, `afters`, `arounds`) and execute a fast path when a method has a single primary and no advices, bypassing closure allocation.
 - **Zero-Allocation Empty Private Vaults (`src/ouro.js`):** Optimized private vault mounting to skip `Object.defineProperty` loops when a class's private blueprint is empty.
 - **Class-Level Cache Purge Throttling (`src/ouro.js`):** Updated `StorageTrait` to track `purged` state at the Class level rather than per instance, eliminating redundant `_meta_lastPurge` storage reads across instantiations.

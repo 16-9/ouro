@@ -1,12 +1,25 @@
 /* global unsafeWindow Ouro Extension Class Trait globalThis GM_xmlhttpRequest GM_addStyle */
+/* global RouteURL NativeElement DOMValue Extractor DOMExtractor JSONExtractor Page Exportable Downloadable */
+/* global APIContent JSONContent DOMContent HTMLContent XMLContent JSONPage DOMPage XMLPage HTMLPage */
 Ouro.pageSystemExtension = new Extension(
     "Page System",
     "Comprehensive scraping and routing framework built on top of Ouro classes, traits, and native wrappers.",
     function () {
+        if (!Array.prototype.parallel) {
+            Object.defineProperty(Array.prototype, "parallel", {
+                value: async function (asyncCallback) {
+                    return Promise.all(this.map(asyncCallback));
+                },
+                writable: true,
+                configurable: true,
+                enumerable: false,
+            });
+        }
+
         // ============================================================================
         // ROUTE URL as an extension to native URL
         // ============================================================================
-        const RouteURL = Class({
+        Class({
             name: "RouteURL",
             description:
                 "A reactive, single-source-of-truth URL template and router.",
@@ -28,8 +41,78 @@ Ouro.pageSystemExtension = new Extension(
             ],
 
             // --- FLATTENED PROPERTIES ---
-            builder: "",
-            args: {},
+            builder: {
+                init: "",
+                onChange(newBuilder) {
+                    const builderStr = Array.isArray(newBuilder)
+                        ? newBuilder[0]
+                        : newBuilder;
+
+                    if (
+                        !builderStr ||
+                        typeof builderStr !== "string" ||
+                        builderStr === "no route"
+                    ) {
+                        this.variables = [];
+                        this.pattern = null;
+                        this.patterns = [];
+                        this.build();
+                        return;
+                    }
+
+                    let patternTarget = builderStr
+                        .replace(/^https?:/i, "")
+                        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                    const parts = patternTarget.split(/\\\$\\\{(.+?)\\\}/);
+
+                    this.variables = parts.filter((_, i) => i % 2 !== 0);
+                    const mappedRegex = parts
+                        .map((part, i) => (i % 2 === 0 ? part : "([^/?#]+)"))
+                        .join("");
+
+                    this.pattern = new RegExp(
+                        `${mappedRegex}(?:[?#].*)?$`,
+                        "i",
+                    );
+                    this.patterns = [this.pattern].concat(
+                        this._providedPatterns || [],
+                    );
+
+                    this.build();
+                },
+            },
+            args: {
+                init: {},
+                transform(val) {
+                    const raw =
+                        val && typeof val === "object" ? val : {};
+                    const routeSelf = this;
+                    return new Proxy(raw, {
+                        set(target, prop, value, receiver) {
+                            const res = Reflect.set(
+                                target,
+                                prop,
+                                value,
+                                receiver,
+                            );
+                            if (typeof routeSelf?.build === "function") {
+                                routeSelf.build();
+                            }
+                            return res;
+                        },
+                        deleteProperty(target, prop) {
+                            const res = Reflect.deleteProperty(target, prop);
+                            if (typeof routeSelf?.build === "function") {
+                                routeSelf.build();
+                            }
+                            return res;
+                        },
+                    });
+                },
+                onChange() {
+                    this.build();
+                },
+            },
             pattern: null, // Keeps a reference to the canonical Regex for variable extraction
             patterns: [], // The combined array of all valid match patterns
             variables: [],
@@ -90,7 +173,7 @@ Ouro.pageSystemExtension = new Extension(
                 });
 
                 this.args = args;
-                this.builder = builderString; // Triggers after.builder
+                this.builder = builderString; // Triggers builder.onChange
             },
 
             build: function () {
@@ -163,57 +246,12 @@ Ouro.pageSystemExtension = new Extension(
                     .join("|");
                 return sign === "" ? "_blank_" : sign;
             },
-
-            // --- AOP ADVICE ---
-            after: {
-                builder(newBuilder) {
-                    const builderStr = Array.isArray(newBuilder)
-                        ? newBuilder[0]
-                        : newBuilder;
-
-                    if (
-                        !builderStr ||
-                        typeof builderStr !== "string" ||
-                        builderStr === "no route"
-                    ) {
-                        this.variables = [];
-                        this.pattern = null;
-                        this.patterns = [];
-                        this._nativeObject = undefined;
-                        return;
-                    }
-
-                    let patternTarget = builderStr
-                        .replace(/^https?:/i, "")
-                        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-                    const parts = patternTarget.split(/\\\$\\\{(.+?)\\\}/);
-
-                    this.variables = parts.filter((_, i) => i % 2 !== 0);
-                    const mappedRegex = parts
-                        .map((part, i) => (i % 2 === 0 ? part : "([^/?#]+)"))
-                        .join("");
-
-                    this.pattern = new RegExp(
-                        `${mappedRegex}(?:[?#].*)?$`,
-                        "i",
-                    );
-                    this.patterns = [this.pattern].concat(
-                        this._providedPatterns || [],
-                    );
-
-                    this.build();
-                },
-
-                args() {
-                    this.build();
-                },
-            },
         });
 
         // ============================================================================
         // DOMValue as an extension of DOM element
         // ============================================================================
-        const NativeElement = Class({
+        Class({
             name: "NativeElement",
             traits: [Trait.native(HTMLElement, { state: "element" })],
             initialize: function (el) {
@@ -221,7 +259,7 @@ Ouro.pageSystemExtension = new Extension(
             },
         });
 
-        const DOMValue = Class({
+        Class({
             name: "DOMValue",
             kindOf: NativeElement,
             private: {
@@ -500,9 +538,10 @@ Ouro.pageSystemExtension = new Extension(
         // ==========================================
         // 1. EXTRACTOR Classes
         // ==========================================
-        const Extractor = Class({
+        Class({
             name: "Extractor",
             description: "Abstract base class for all data extractors",
+            requires: ["normalize", "scrape"],
             spec: null,
             scraps: null,
 
@@ -555,7 +594,7 @@ Ouro.pageSystemExtension = new Extension(
             },
         });
 
-        const DOMExtractor = Class({
+        Class({
             name: "DOMExtractor",
             description: "Extracts data from DOM nodes using CSS selectors",
             kindOf: Extractor,
@@ -749,7 +788,7 @@ Ouro.pageSystemExtension = new Extension(
             },
         });
 
-        const JSONExtractor = Class({
+        Class({
             name: "JSONExtractor",
             description:
                 "Extracts data from JSON objects using pointer notation with deep-search fallback",
@@ -948,13 +987,35 @@ Ouro.pageSystemExtension = new Extension(
         // ============================================================================
         // BASE CONTAINER: Page
         // ============================================================================
-        const Page = Class({
+        Class({
             name: "Page",
             class: {
                 routeTemplate: "no route",
                 registry: [],
                 browser: undefined,
-                toast: undefined,
+                toast: {
+                    init: undefined,
+                    ifNeeded() {
+                        return DOMValue.create("div", {
+                            css: {
+                                position: "fixed",
+                                bottom: "20px",
+                                right: "20px",
+                                backgroundColor: "#333333",
+                                color: "#ffffff",
+                                padding: "12px 20px",
+                                borderRadius: "8px",
+                                boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+                                zIndex: "2147483647",
+                                fontFamily: "system-ui, sans-serif",
+                                fontSize: "14px",
+                                transition: "opacity 0.3s ease-in-out",
+                                opacity: "0",
+                                pointerEvents: "none",
+                            },
+                        }).e;
+                    },
+                },
                 providers: undefined,
                 enrichers: undefined,
                 namespace: undefined,
@@ -967,6 +1028,7 @@ Ouro.pageSystemExtension = new Extension(
                 _activeRequests: 0,
                 _requestQueue: [],
                 _injectedStyles: new Set(),
+                _spaWatching: false,
 
                 _acquireSlot() {
                     const limit = Page.maxConcurrent || 8;
@@ -1008,31 +1070,7 @@ Ouro.pageSystemExtension = new Extension(
                     console.info(`[Ouro — Page] ${message}`, ...otherStuff);
                     if (!window || !document.body) return;
 
-                    const toast = this.toast
-                        ? this.toast
-                        : (() => {
-                              this.toast = document.createElementNS(
-                                  "http://www.w3.org/1999/xhtml",
-                                  "div",
-                              );
-                              Object.assign(this.toast.style, {
-                                  position: "fixed",
-                                  bottom: "20px",
-                                  right: "20px",
-                                  backgroundColor: "#333333",
-                                  color: "#ffffff",
-                                  padding: "12px 20px",
-                                  borderRadius: "8px",
-                                  boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
-                                  zIndex: "2147483647",
-                                  fontFamily: "system-ui, sans-serif",
-                                  fontSize: "14px",
-                                  transition: "opacity 0.3s ease-in-out",
-                                  opacity: "0",
-                                  pointerEvents: "none",
-                              });
-                              return this.toast;
-                          })();
+                    const toast = Page.toast;
                     toast.textContent = message;
                     toast.style.opacity = "1";
                     document.body.appendChild(toast);
@@ -1046,6 +1084,18 @@ Ouro.pageSystemExtension = new Extension(
                 cache: {},
                 register(definition) {
                     definition.kindOf = definition.kindOf || this;
+                    if (
+                        definition.structure !== undefined &&
+                        definition.schema === undefined
+                    ) {
+                        definition.schema = definition.structure;
+                    }
+                    if (
+                        definition.class?.structure !== undefined &&
+                        definition.class?.schema === undefined
+                    ) {
+                        definition.class.schema = definition.class.structure;
+                    }
                     const newSubclass = Class(definition);
                     Page.registry.push(newSubclass);
 
@@ -1185,10 +1235,70 @@ Ouro.pageSystemExtension = new Extension(
                     await instance.process();
                     return instance;
                 },
+                processUrl(url = window.location?.href) {
+                    console.log(`[Ouro — SPA Router] URL changed to: ${url}`);
+                    return Page.process(url)
+                        .then((activePage) => {
+                            if (typeof unsafeWindow !== "undefined") {
+                                unsafeWindow.thisPage = activePage;
+                            }
+                            return activePage;
+                        })
+                        .catch((err) => {
+                            console.error(
+                                "[Ouro — ❌ Fatal Crash] The lifecycle threw an error:",
+                                err,
+                            );
+                        });
+                },
+                watchSPA() {
+                    if (this._spaWatching || typeof window === "undefined")
+                        return;
+                    this._spaWatching = true;
+                    let lastUrl = window.location.href;
+
+                    const checkUrlChange = () => {
+                        const currentUrl = window.location.href;
+                        if (currentUrl !== lastUrl) {
+                            lastUrl = currentUrl;
+                            setTimeout(() => Page.processUrl(currentUrl), 100);
+                        }
+                    };
+
+                    if (typeof window.addEventListener === "function") {
+                        window.addEventListener("popstate", checkUrlChange);
+                    }
+
+                    if (typeof history !== "undefined") {
+                        const originalPush = history.pushState;
+                        history.pushState = function () {
+                            originalPush.apply(this, arguments);
+                            checkUrlChange();
+                        };
+
+                        const originalReplace = history.replaceState;
+                        history.replaceState = function () {
+                            originalReplace.apply(this, arguments);
+                            checkUrlChange();
+                        };
+                    }
+                },
+                start(url = window.location?.href) {
+                    this.watchSPA();
+                    return this.processUrl(url);
+                },
             },
 
             route: null,
-            request: null,
+            request: {
+                init: undefined,
+                ifNeeded() {
+                    return new Request(this.route.native(), {
+                        method: "GET",
+                        headers: { Accept: this.accept },
+                    });
+                },
+            },
             response: null,
             rawText: null,
             content: null,
@@ -1231,7 +1341,8 @@ Ouro.pageSystemExtension = new Extension(
                     return;
                 }
                 const mergedProviders = this._collectLineageMap("providers");
-                let mutated = false;
+                if (!mergedProviders) return;
+
                 for (const varName of this.route.variables) {
                     if (
                         this.route.args[varName] !== undefined &&
@@ -1239,44 +1350,7 @@ Ouro.pageSystemExtension = new Extension(
                     ) {
                         continue;
                     }
-                    let provider = mergedProviders?.[varName];
-                    if (provider === undefined) {
-                        if (
-                            varName === "serverUrl" &&
-                            typeof globalThis.Plex !== "undefined"
-                        ) {
-                            provider = [
-                                () => globalThis.Plex.serverUrl,
-                                globalThis.plexServerInfoPage,
-                            ];
-                        } else if (
-                            varName === "librarySection" &&
-                            typeof globalThis.Plex !== "undefined"
-                        ) {
-                            provider = [
-                                () => globalThis.Plex.librarySection,
-                                globalThis.plexLibraryPage,
-                            ];
-                        } else if (
-                            varName === "plexToken" &&
-                            typeof globalThis.Plex !== "undefined"
-                        ) {
-                            provider = () => globalThis.Plex.extractToken();
-                        } else if (
-                            varName === "machineIdentifier" &&
-                            typeof globalThis.Plex !== "undefined"
-                        ) {
-                            provider = [
-                                () => globalThis.Plex.machineIdentifier,
-                                globalThis.plexServerInfoPage,
-                            ];
-                        } else if (
-                            varName === "tmdbKey" &&
-                            typeof globalThis.TMDB !== "undefined"
-                        ) {
-                            provider = () => globalThis.TMDB.apiKey;
-                        }
-                    }
+                    const provider = mergedProviders[varName];
                     if (provider === undefined) continue;
 
                     if (Array.isArray(provider)) {
@@ -1299,11 +1373,6 @@ Ouro.pageSystemExtension = new Extension(
                     } else {
                         this.route.args[varName] = provider;
                     }
-                    mutated = true;
-                }
-
-                if (mutated) {
-                    this.route.build();
                 }
             },
 
@@ -1330,14 +1399,7 @@ Ouro.pageSystemExtension = new Extension(
                 this.data = { dataStatus: 0 };
             },
             getRequest() {
-                const args = [
-                    this.route.native(),
-                    {
-                        method: "GET",
-                        headers: { Accept: this.accept },
-                    },
-                ];
-                return (this.request ??= new Request(...args));
+                return this.request;
             },
             async _networkFetch(req) {
                 const maxRetries =
@@ -1509,7 +1571,7 @@ Ouro.pageSystemExtension = new Extension(
                         this.content = document;
                     }
                 } else {
-                    const req = this.getRequest();
+                    const req = this.request;
                     Page.showToast(
                         `Fetching ${this.constructor.name} (${this.route.signature})`,
                         this,
@@ -1530,8 +1592,22 @@ Ouro.pageSystemExtension = new Extension(
                     this.structure ||
                     this.constructor.schema ||
                     this.constructor.structure;
-                if (!this.content || !this.extractor || !spec)
+                if (!this.content || !this.extractor)
                     return (this.data = {});
+                if (!spec) {
+                    if (
+                        this.extractor === JSONExtractor &&
+                        typeof this.content === "object" &&
+                        this.content !== null
+                    ) {
+                        const rawJson = this.content.json ?? this.content;
+                        this.data = Array.isArray(rawJson)
+                            ? [...rawJson]
+                            : { ...rawJson };
+                        return this.data;
+                    }
+                    return (this.data = {});
+                }
                 try {
                     const extractor = new this.extractor(spec);
                     const targetDoc =
@@ -1841,7 +1917,7 @@ Ouro.pageSystemExtension = new Extension(
         // ============================================================================
         // Traits: Exportable & Downloadable & Content Types
         // ============================================================================
-        const Exportable = new Trait({
+        new Trait({
             name: "Exportable",
             exportData(format = "ini") {
                 const formatType = format.toLowerCase();
@@ -1914,7 +1990,7 @@ Ouro.pageSystemExtension = new Extension(
             },
         });
 
-        const Downloadable = new Trait({
+        new Trait({
             name: "Downloadable",
             autoDownload: false,
 
@@ -1964,13 +2040,14 @@ Ouro.pageSystemExtension = new Extension(
             },
         });
 
-        const APIContent = new Trait({
+        new Trait({
+            name: "APIContent",
             get api() {
                 return this.content;
             },
         });
 
-        const JSONContent = new Trait({
+        new Trait({
             traits: [APIContent],
             name: "JSONContent",
             accept: "application/json",
@@ -2153,13 +2230,7 @@ Ouro.pageSystemExtension = new Extension(
                                 }
                             `;
 
-                            if (typeof GM_addStyle !== "undefined") {
-                                GM_addStyle(themeCSS);
-                            } else {
-                                const style = document.createElement("style");
-                                style.textContent = themeCSS;
-                                document.head.appendChild(style);
-                            }
+                            Page.addStyle(themeCSS);
                         } catch (e) {
                             console.error(
                                 "[Ouro — Page] Failed to parse page as JSON for layout building",
@@ -2171,7 +2242,7 @@ Ouro.pageSystemExtension = new Extension(
             },
         });
 
-        const DOMContent = new Trait({
+        new Trait({
             name: "DOMContent",
             accept: "*/*",
             extractor: DOMExtractor,
@@ -2195,13 +2266,13 @@ Ouro.pageSystemExtension = new Extension(
             },
         });
 
-        const HTMLContent = new Trait({
+        new Trait({
             traits: [DOMContent, Exportable, Downloadable],
             name: "HTMLContent",
             accept: "text/html",
         });
 
-        const XMLContent = new Trait({
+        new Trait({
             traits: [DOMContent, APIContent],
             name: "XMLContent",
             accept: "application/xml",
@@ -2210,48 +2281,28 @@ Ouro.pageSystemExtension = new Extension(
         // ============================================================================
         // Page Subclasses Registration
         // ============================================================================
-        const JSONPage = Page.register({
+        Page.register({
             name: "JSONPage",
             class: { routeTemplate: "${somePath}.json" },
             traits: [JSONContent],
         });
 
-        const DOMPage = Page.register({
+        Page.register({
             name: "DOMPage",
             class: { routeTemplate: "no route" },
             traits: [DOMContent],
         });
 
-        const XMLPage = DOMPage.register({
+        DOMPage.register({
             name: "XMLPage",
             class: { routeTemplate: "${somePath}.xml" },
             traits: [XMLContent],
         });
 
-        const HTMLPage = DOMPage.register({
+        DOMPage.register({
             name: "HTMLPage",
             class: { routeTemplate: "${pageurl}" },
             traits: [HTMLContent, Exportable, Downloadable],
         });
-
-        // Publish components globally via Ouro namespace or unsafeWindow
-        Ouro.publish("RouteURL", RouteURL);
-        Ouro.publish("NativeElement", NativeElement);
-        Ouro.publish("DOMValue", DOMValue);
-        Ouro.publish("Extractor", Extractor);
-        Ouro.publish("DOMExtractor", DOMExtractor);
-        Ouro.publish("JSONExtractor", JSONExtractor);
-        Ouro.publish("Page", Page);
-        Ouro.publish("Exportable", Exportable);
-        Ouro.publish("Downloadable", Downloadable);
-        Ouro.publish("APIContent", APIContent);
-        Ouro.publish("JSONContent", JSONContent);
-        Ouro.publish("DOMContent", DOMContent);
-        Ouro.publish("HTMLContent", HTMLContent);
-        Ouro.publish("XMLContent", XMLContent);
-        Ouro.publish("JSONPage", JSONPage);
-        Ouro.publish("DOMPage", DOMPage);
-        Ouro.publish("XMLPage", XMLPage);
-        Ouro.publish("HTMLPage", HTMLPage);
     },
 );

@@ -1,17 +1,20 @@
-/* global unsafeWindow Ouro Extension Class globalCache */
+/* global unsafeWindow Ouro Extension Class globalCache Graph */
 Ouro.graphSystemExtension = new Extension(
     "Graph System",
     "A robust, efficient graph-based Document Store architecture for mapping multi-variant payloads.",
     function () {
-        const Graph = Class({
+        Class({
             name: "Graph",
             traits: [globalCache],
+            requires: ["primaryKeys"],
 
             properties: {
                 public: {
                     class: {
-                        primaryKeys: [],
-                        secondaryKeys: [],
+                        primaryKeys: { init: [], type: Array },
+                        secondaryKeys: { init: [], type: Array },
+                        keyTypes: {},
+                        relations: {},
                         autoCommit: true,
                     },
                 },
@@ -31,33 +34,49 @@ Ouro.graphSystemExtension = new Extension(
                         // DATABASE DRIVER API
                         // ==========================================
                         get(query) {
-                            const queryKeys = Object.keys(query);
-                            if (queryKeys.length !== 1) {
+                            if (!query || typeof query !== "object") {
                                 throw new Error(
-                                    `[${this.name}] get() requires exactly one primary key-value pair.`,
+                                    `[${this.name}] get() requires a query object.`,
+                                );
+                            }
+                            const queryKeys = Object.keys(query);
+                            if (queryKeys.length === 0) {
+                                throw new Error(
+                                    `[${this.name}] get() requires at least one key-value pair.`,
                                 );
                             }
 
-                            const searchString = `${queryKeys[0]}:${query[queryKeys[0]]}`;
-
                             const instance = new this();
 
-                            const graphId = instance.fromCache(
-                                `Index_${searchString}`,
-                            );
-                            if (!graphId) return null;
+                            for (const k of queryKeys) {
+                                const val = query[k];
+                                if (val === undefined || val === null) continue;
+                                const searchString = `${k}:${val}`;
+                                const graphId = instance.fromCache(
+                                    `Index_${searchString}`,
+                                );
+                                if (!graphId) continue;
 
-                            const vaultData = instance.fromCache(
-                                `Vault_${graphId}`,
-                            );
-                            if (!vaultData) return null;
+                                const vaultData = instance.fromCache(
+                                    `Vault_${graphId}`,
+                                );
+                                if (!vaultData) continue;
 
-                            instance.initialize(
-                                graphId,
-                                vaultData.payload,
-                                vaultData.indexes,
-                            );
-                            return instance;
+                                instance.initialize(
+                                    graphId,
+                                    vaultData.payload,
+                                    vaultData.indexes,
+                                );
+                                return instance;
+                            }
+
+                            return null;
+                        },
+
+                        resolve(query, relationName) {
+                            const instance = this.get(query);
+                            if (!instance) return [];
+                            return instance.resolve(relationName);
                         },
 
                         put(...args) {
@@ -247,15 +266,60 @@ Ouro.graphSystemExtension = new Extension(
                             );
                         },
 
+                        resolve(relationName) {
+                            const rel =
+                                this.constructor.relations?.[relationName];
+                            if (!rel) return [];
+                            const targetGraph =
+                                typeof rel.target === "function" &&
+                                !rel.target.__meta
+                                    ? rel.target()
+                                    : rel.target || rel.graph;
+                            const foreignKey = rel.foreignKey || relationName;
+                            const targetKey = rel.targetKey || foreignKey;
+                            if (
+                                !targetGraph ||
+                                typeof targetGraph.get !== "function"
+                            )
+                                return [];
+
+                            return this.records.map((rec) => {
+                                const fkVal = rec[foreignKey];
+                                if (fkVal === undefined || fkVal === null)
+                                    return { ...rec, [relationName]: null };
+                                const related = targetGraph.get({
+                                    [targetKey]: fkVal,
+                                });
+                                return {
+                                    ...rec,
+                                    [relationName]: related
+                                        ? related.record
+                                        : null,
+                                };
+                            });
+                        },
+
                         // ==========================================
                         // ACTIVE RECORD API
                         // ==========================================
                         put(hash) {
                             const schema = this.constructor.primaryKeys || [];
+                            const keyTypes = this.constructor.keyTypes || {};
                             const variantPayload = {};
                             let hasVariantData = false;
 
-                            for (const [key, value] of Object.entries(hash)) {
+                            for (const [key, rawValue] of Object.entries(
+                                hash,
+                            )) {
+                                let value = rawValue;
+                                if (value != null && keyTypes[key]) {
+                                    if (keyTypes[key] === Number)
+                                        value = Number(value);
+                                    else if (keyTypes[key] === String)
+                                        value = String(value);
+                                    else if (keyTypes[key] === Boolean)
+                                        value = Boolean(value);
+                                }
                                 if (schema.includes(key)) {
                                     const indexString = `${key}:${value}`;
                                     if (!this.indexes.includes(indexString)) {
@@ -305,7 +369,12 @@ Ouro.graphSystemExtension = new Extension(
                                           typeof matchObjOrFn === "object" &&
                                           matchObjOrFn !== null &&
                                           Object.entries(matchObjOrFn).every(
-                                              ([k, v]) => variant[k] === v,
+                                              ([k, v]) =>
+                                                  variant[k] === v ||
+                                                  (variant[k] != null &&
+                                                      v != null &&
+                                                      String(variant[k]) ===
+                                                          String(v)),
                                           );
 
                             const removed = [];
@@ -423,8 +492,5 @@ Ouro.graphSystemExtension = new Extension(
                 },
             },
         });
-
-        // Publish to the global Ouro namespace so subclasses like MovieGraph can inherit it
-        Ouro.publish("Graph", Graph);
     },
 );

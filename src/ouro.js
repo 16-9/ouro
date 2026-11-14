@@ -13,7 +13,7 @@
 // START OURO CORE
 
 globalThis.Ouro = (function () {
-    const VERSION = "2.0.0";
+    const VERSION = "2.1.0";
 
     // --- INTERNAL NAMESPACE & STATE ---
     let isLoaded = false;
@@ -25,6 +25,17 @@ globalThis.Ouro = (function () {
         ExtensionPackage,
         Ouro_API;
 
+    const FacetVocabulary = {
+        init: "init",
+        value: "value",
+        default: "default",
+        ifNeeded: "ifNeeded",
+        transform: "transform",
+        validate: "validate",
+        onChange: "onChange",
+        type: "type",
+    };
+
     const Vocabulary = {
         name: "name",
         description: "description",
@@ -32,7 +43,14 @@ globalThis.Ouro = (function () {
         properties: "properties",
         methods: "methods",
     };
+    Object.defineProperty(Vocabulary, "facets", {
+        value: FacetVocabulary,
+        enumerable: false,
+        configurable: true,
+        writable: true,
+    });
     const v = Vocabulary;
+    const fv = FacetVocabulary;
 
     const banner = `
                                      .:-----.
@@ -119,6 +137,116 @@ globalThis.Ouro = (function () {
             return secrets;
         }
 
+        const RawDefSymbol = Symbol("Ouro.rawDefinition");
+        const FacetSymbol = Symbol.for("Ouro.FacetDescriptor");
+
+        function createFaceted(spec = {}) {
+            if (spec && typeof spec === "object") {
+                Object.defineProperty(spec, FacetSymbol, {
+                    value: true,
+                    enumerable: false,
+                    configurable: true,
+                });
+            }
+            return spec;
+        }
+
+        function isFacetDescriptor(val) {
+            if (!val || typeof val !== "object" || Array.isArray(val))
+                return false;
+            if (val[FacetSymbol]) return true;
+            if (Object.getPrototypeOf(val) !== Object.prototype) return false;
+            const keys = Object.keys(val);
+            if (keys.length === 0) return false;
+            const validKeys = new Set(Object.values(fv));
+            if (!keys.every((k) => validKeys.has(k))) return false;
+            const activeKeys = [
+                fv.ifNeeded,
+                fv.transform,
+                fv.validate,
+                fv.onChange,
+                fv.type,
+            ];
+            return activeKeys.some(
+                (k) => k in val && typeof val[k] === "function",
+            );
+        }
+
+        function applySlotType(val, typeSpec, propName) {
+            if (val === undefined || val === null || !typeSpec) return val;
+            if (typeSpec === Number) {
+                const coerced = Number(val);
+                if (Number.isNaN(coerced)) {
+                    throw new Error(
+                        `Slot validation failed for '${propName}': expected Number`,
+                    );
+                }
+                return coerced;
+            }
+            if (typeSpec === String) {
+                return String(val);
+            }
+            if (typeSpec === Boolean) {
+                return Boolean(val);
+            }
+            if (typeSpec === Array) {
+                if (!Array.isArray(val)) {
+                    throw new Error(
+                        `Slot validation failed for '${propName}': expected Array`,
+                    );
+                }
+                return val;
+            }
+            if (typeSpec === Object) {
+                if (typeof val !== "object" || Array.isArray(val)) {
+                    throw new Error(
+                        `Slot validation failed for '${propName}': expected Object`,
+                    );
+                }
+                return val;
+            }
+            if (typeof typeSpec === "function") {
+                const ok =
+                    val instanceof typeSpec ||
+                    (typeof val?.isA === "function" && val.isA(typeSpec));
+                if (!ok) {
+                    throw new Error(
+                        `Slot validation failed for '${propName}': expected ${typeSpec.name || "matching type"}`,
+                    );
+                }
+                return val;
+            }
+            return val;
+        }
+
+        function cloneRawDefinition(def) {
+            if (!def || typeof def !== "object") return def;
+            const copy = {};
+            const descs = Object.getOwnPropertyDescriptors(def);
+            for (const [k, desc] of Object.entries(descs)) {
+                if (
+                    "value" in desc &&
+                    desc.value &&
+                    typeof desc.value === "object" &&
+                    !Array.isArray(desc.value) &&
+                    Object.getPrototypeOf(desc.value) === Object.prototype
+                ) {
+                    desc.value = cloneRawDefinition(desc.value);
+                } else if ("value" in desc && Array.isArray(desc.value)) {
+                    desc.value = [...desc.value];
+                }
+                Object.defineProperty(copy, k, desc);
+            }
+            if (def[FacetSymbol]) {
+                Object.defineProperty(copy, FacetSymbol, {
+                    value: true,
+                    enumerable: false,
+                    configurable: true,
+                });
+            }
+            return copy;
+        }
+
         function matchesLineage(startClass, target) {
             if (!target) return false;
             const isName = typeof target === "string";
@@ -126,22 +254,37 @@ globalThis.Ouro = (function () {
             while (curr && curr.__meta) {
                 if (
                     isName
-                        ? curr.__meta.name === target
-                        : curr === target || curr.__meta.name === target.name
+                        ? curr.__meta.name === target ||
+                          curr.__meta.nativeParent?.name === target
+                        : curr === target ||
+                          curr.__meta.nativeParent === target ||
+                          curr.__meta.name === target.name
                 ) {
                     return true;
                 }
                 curr = curr.__meta.parent;
             }
+            if (
+                !isName &&
+                typeof target === "function" &&
+                startClass?.prototype
+            ) {
+                return startClass.prototype instanceof target;
+            }
             return false;
         }
+
+        const allocateHooks = new Set();
+        const instantiateHooks = new Set();
 
         function allocate(definition, parentClass = Object) {
             const className = definition[v.name] || "AnonymousClass";
 
             const fns = {
                 [className]: function (...args) {
-                    this.constructor.__meta?.instances.add(this);
+                    for (const hook of instantiateHooks) {
+                        hook(this);
+                    }
 
                     const priv = this.constructor.__private?.instance;
                     if (priv && Object.keys(priv).length > 0) {
@@ -201,12 +344,16 @@ globalThis.Ouro = (function () {
 
             Object.setPrototypeOf(rawClass, parentClass);
 
+            const rawDef =
+                (definition && definition[RawDefSymbol]) ||
+                cloneRawDefinition(definition);
+
             const meta = {
                 name: className,
                 description: definition[v.description] || "",
                 parent: parentClass,
-                subclasses: [],
-                instances: new WeakSet(),
+                rawDefinition: rawDef,
+                normalizedDefinition: definition,
             };
 
             Object.defineProperty(rawClass, "__meta", {
@@ -217,20 +364,28 @@ globalThis.Ouro = (function () {
                 configurable: false,
             });
 
-            if (Array.isArray(parentClass.__meta?.subclasses)) {
-                parentClass.__meta.subclasses.push(className);
+            for (const hook of allocateHooks) {
+                hook(rawClass, parentClass, meta);
             }
 
             return rawClass;
         }
         return {
             allocate,
+            allocateHooks,
+            instantiateHooks,
             isCloneable,
             cloneValue,
+            cloneRawDefinition,
             ensurePrivateVault,
             matchesLineage,
+            createFaceted,
+            isFacetDescriptor,
+            applySlotType,
             PrivateStateRegistry,
             PrivateSymbol,
+            RawDefSymbol,
+            FacetSymbol,
         };
     })();
 
@@ -245,6 +400,7 @@ globalThis.Ouro = (function () {
     function forgeConstructor(definition) {
         const parentClass = definition[v.kindOf] || Object;
         const newClass = Bootstrap.allocate(definition, parentClass);
+        const rawDef = newClass.__meta?.rawDefinition || definition;
         Object.defineProperty(newClass, "__private", {
             value: {
                 instance: {
@@ -253,7 +409,7 @@ globalThis.Ouro = (function () {
                 },
                 class: {
                     ...(parentClass.__private?.class || {}),
-                    definition: definition,
+                    definition: rawDef,
                     ...(definition[v.properties]?.private?.class || {}),
                 },
             },
@@ -435,6 +591,7 @@ globalThis.Ouro = (function () {
                                 descriptors,
                             )) {
                                 classConstructor.__meta.slotSymbols ??= {};
+                                classConstructor.__meta.slotFacets ??= {};
                                 const existingSlot =
                                     classConstructor.__meta.slotSymbols[
                                         propName
@@ -449,16 +606,72 @@ globalThis.Ouro = (function () {
                                     continue;
                                 }
 
+                                const hasAccessor =
+                                    descriptor.get !== undefined ||
+                                    descriptor.set !== undefined;
+                                const rawVal = descriptor.value;
+                                const isInlineFacet =
+                                    !hasAccessor &&
+                                    Bootstrap.isFacetDescriptor(rawVal);
+                                const defaultVal = isInlineFacet
+                                    ? fv.init in rawVal
+                                        ? rawVal[fv.init]
+                                        : fv.value in rawVal
+                                          ? rawVal[fv.value]
+                                          : rawVal[fv.default]
+                                    : rawVal;
+
+                                let inheritedFacets = {};
+                                let p = classConstructor.__meta?.parent;
+                                while (p && p !== Object) {
+                                    if (p.__meta?.slotFacets?.[propName]) {
+                                        inheritedFacets = {
+                                            ...p.__meta.slotFacets[propName],
+                                            ...inheritedFacets,
+                                        };
+                                    }
+                                    p = p.__meta?.parent;
+                                }
+
+                                const inlineFacets = {};
+                                if (isInlineFacet) {
+                                    for (const [semKey, rawFk] of [
+                                        ["ifNeeded", fv.ifNeeded],
+                                        ["transform", fv.transform],
+                                        ["validate", fv.validate],
+                                        ["onChange", fv.onChange],
+                                        ["type", fv.type],
+                                    ]) {
+                                        if (rawVal[rawFk] !== undefined) {
+                                            inlineFacets[semKey] =
+                                                rawVal[rawFk];
+                                        }
+                                    }
+                                }
+
                                 const backingSymbol =
                                     existingSlot?.symbol ||
                                     existingSlot ||
                                     Symbol(`Ouro.slot.${propName}`);
-                                const defaultVal = descriptor.value;
+                                const facets = Object.assign(
+                                    {},
+                                    inheritedFacets,
+                                    existingSlot?.facets || {},
+                                    classConstructor.__meta.slotFacets[
+                                        propName
+                                    ] || {},
+                                    inlineFacets,
+                                );
+                                classConstructor.__meta.slotFacets[propName] =
+                                    facets;
                                 const needsClone =
                                     !isStatic &&
                                     Bootstrap.isCloneable(defaultVal);
                                 const slotMetaobject = {
+                                    name: propName,
                                     symbol: backingSymbol,
+                                    isStatic: Boolean(isStatic),
+                                    facets,
                                     get: (recv) => {
                                         if (
                                             needsClone &&
@@ -468,23 +681,92 @@ globalThis.Ouro = (function () {
                                                 backingSymbol,
                                             )
                                         ) {
-                                            recv[backingSymbol] =
+                                            let cloned =
                                                 Bootstrap.cloneValue(
                                                     defaultVal,
                                                 );
+                                            if (
+                                                typeof facets.transform ===
+                                                "function"
+                                            ) {
+                                                cloned = facets.transform.call(
+                                                    recv,
+                                                    cloned,
+                                                    propName,
+                                                );
+                                            }
+                                            recv[backingSymbol] = cloned;
+                                        }
+                                        if (
+                                            recv[backingSymbol] === undefined &&
+                                            typeof facets.ifNeeded ===
+                                                "function" &&
+                                            (isStatic || recv !== target)
+                                        ) {
+                                            const computed =
+                                                facets.ifNeeded.call(
+                                                    recv,
+                                                    propName,
+                                                );
+                                            if (computed !== undefined) {
+                                                recv[backingSymbol] = computed;
+                                            }
+                                            return computed;
                                         }
                                         return recv[backingSymbol];
                                     },
                                     set: (recv, val) => {
-                                        recv[backingSymbol] = val;
+                                        let nextVal = val;
+                                        if (facets.type !== undefined) {
+                                            nextVal = Bootstrap.applySlotType(
+                                                nextVal,
+                                                facets.type,
+                                                propName,
+                                            );
+                                        }
+                                        if (
+                                            typeof facets.transform ===
+                                            "function"
+                                        ) {
+                                            nextVal = facets.transform.call(
+                                                recv,
+                                                nextVal,
+                                                propName,
+                                            );
+                                        }
+                                        if (
+                                            typeof facets.validate ===
+                                            "function"
+                                        ) {
+                                            const valid = facets.validate.call(
+                                                recv,
+                                                nextVal,
+                                                propName,
+                                            );
+                                            if (valid === false) {
+                                                throw new Error(
+                                                    `Slot validation failed for '${propName}'`,
+                                                );
+                                            }
+                                        }
+                                        const prevVal = recv[backingSymbol];
+                                        recv[backingSymbol] = nextVal;
+                                        if (
+                                            typeof facets.onChange ===
+                                            "function"
+                                        ) {
+                                            facets.onChange.call(
+                                                recv,
+                                                nextVal,
+                                                prevVal,
+                                                propName,
+                                            );
+                                        }
+                                        return nextVal;
                                     },
                                 };
                                 classConstructor.__meta.slotSymbols[propName] =
                                     slotMetaobject;
-
-                                const hasAccessor =
-                                    descriptor.get !== undefined ||
-                                    descriptor.set !== undefined;
 
                                 if (
                                     hasAccessor &&
@@ -546,7 +828,11 @@ globalThis.Ouro = (function () {
                                         enumerable: true,
                                         configurable: true,
                                     });
-                                    target[backingSymbol] = descriptor.value;
+                                    if (isStatic && defaultVal !== undefined) {
+                                        slotMetaobject.set(target, defaultVal);
+                                    } else {
+                                        target[backingSymbol] = defaultVal;
+                                    }
                                 }
                             }
                         };
@@ -566,8 +852,115 @@ globalThis.Ouro = (function () {
 
                         return classConstructor;
                     },
+                    addProperty: function (
+                        propName,
+                        valueOrDesc,
+                        options = {},
+                    ) {
+                        if (!propName || typeof propName !== "string")
+                            return this;
+                        const visibility =
+                            options.visibility ||
+                            (options.private ? "private" : "public");
+                        const allocation =
+                            options.allocation ||
+                            (options.static || options.class
+                                ? "class"
+                                : options.shared
+                                  ? "shared"
+                                  : "instance");
+                        const overwrite =
+                            options.overwrite !== undefined
+                                ? Boolean(options.overwrite)
+                                : true;
+                        const holder = {};
+                        if (
+                            valueOrDesc &&
+                            typeof valueOrDesc === "object" &&
+                            ("get" in valueOrDesc || "set" in valueOrDesc) &&
+                            Object.keys(valueOrDesc).every((k) =>
+                                [
+                                    "get",
+                                    "set",
+                                    "enumerable",
+                                    "configurable",
+                                ].includes(k),
+                            )
+                        ) {
+                            Object.defineProperty(holder, propName, {
+                                get: valueOrDesc.get,
+                                set: valueOrDesc.set,
+                                enumerable: true,
+                                configurable: true,
+                            });
+                        } else {
+                            holder[propName] = valueOrDesc;
+                        }
+                        if (
+                            options.facets &&
+                            typeof options.facets === "object"
+                        ) {
+                            this.__meta.slotFacets ??= {};
+                            this.__meta.slotFacets[propName] = {
+                                ...(this.__meta.slotFacets[propName] || {}),
+                                ...options.facets,
+                            };
+                        }
+                        return this.addProperties(
+                            { [visibility]: { [allocation]: holder } },
+                            overwrite,
+                        );
+                    },
+                    setSlotFacet: function (propName, facetName, fn) {
+                        if (!propName || !facetName) return this;
+                        this.__meta.slotFacets ??= {};
+                        this.__meta.slotFacets[propName] ??= {};
+                        this.__meta.slotFacets[propName][facetName] = fn;
+                        const slotObj = this.__meta.slotSymbols?.[propName];
+                        if (slotObj && typeof slotObj === "object") {
+                            slotObj.facets ??= {};
+                            slotObj.facets[facetName] = fn;
+                        }
+                        return this;
+                    },
+                    getSlotFacet: function (propName, facetName) {
+                        return (
+                            this.__meta?.slotFacets?.[propName]?.[facetName] ??
+                            this.__meta?.slotSymbols?.[propName]?.facets?.[
+                                facetName
+                            ]
+                        );
+                    },
+                    addMethod: function (name, fn, options = {}) {
+                        if (
+                            !name ||
+                            typeof name !== "string" ||
+                            (typeof fn !== "function" && typeof fn !== "string")
+                        )
+                            return this;
+                        const qualifier = options.qualifier || "primary";
+                        const visibility =
+                            qualifier !== "primary"
+                                ? qualifier
+                                : options.visibility ||
+                                  (options.private ? "private" : "public");
+                        const allocation =
+                            options.allocation ||
+                            (options.static || options.class
+                                ? "class"
+                                : options.shared
+                                  ? "shared"
+                                  : "instance");
+                        return this.addMethods({
+                            [visibility]: {
+                                [allocation]: {
+                                    [name]: fn,
+                                },
+                            },
+                        });
+                    },
                     addMethods: function (matrixObj) {
-                        if (!matrixObj) return;
+                        if (!matrixObj) return this;
                         const classConstructor = this;
 
                         for (const key of [
@@ -658,10 +1051,20 @@ globalThis.Ouro = (function () {
                                 if (isUpgraded) continue;
 
                                 classConstructor.__meta.slotSymbols ??= {};
+                                classConstructor.__meta.slotFacets ??= {};
                                 const slotObj =
                                     classConstructor.__meta.slotSymbols[
                                         propName
                                     ];
+                                if (
+                                    slotObj &&
+                                    typeof slotObj === "object" &&
+                                    slotObj.facets
+                                ) {
+                                    classConstructor.__meta.slotFacets[
+                                        propName
+                                    ] = slotObj.facets;
+                                }
                                 const backingSymbol =
                                     slotObj?.symbol ||
                                     slotObj ||
@@ -669,6 +1072,11 @@ globalThis.Ouro = (function () {
                                 classConstructor.__meta.slotSymbols[propName] =
                                     backingSymbol;
 
+                                const isSlotMetaAccessor = Boolean(
+                                    slotObj &&
+                                    typeof slotObj === "object" &&
+                                    typeof slotObj.get === "function",
+                                );
                                 const originalGet = descriptor.get;
                                 const originalSet = descriptor.set;
                                 const hasAccessor =
@@ -700,15 +1108,87 @@ globalThis.Ouro = (function () {
                                                     defaultVal,
                                                 );
                                         }
+                                        const facets =
+                                            classConstructor.__meta
+                                                ?.slotFacets?.[propName];
+                                        if (
+                                            recv[backingSymbol] === undefined &&
+                                            facets &&
+                                            typeof facets.ifNeeded ===
+                                                "function" &&
+                                            (isStatic || recv !== target)
+                                        ) {
+                                            const computed =
+                                                facets.ifNeeded.call(
+                                                    recv,
+                                                    propName,
+                                                );
+                                            if (computed !== undefined) {
+                                                recv[backingSymbol] = computed;
+                                            }
+                                            return computed;
+                                        }
                                         return recv[backingSymbol];
                                     }
+                                    if (isSlotMetaAccessor && originalSet) {
+                                        return originalSet.call(recv, val);
+                                    }
+                                    const facets =
+                                        classConstructor.__meta?.slotFacets?.[
+                                            propName
+                                        ];
+                                    let nextVal = val;
+                                    if (facets && facets.type !== undefined) {
+                                        nextVal = Bootstrap.applySlotType(
+                                            nextVal,
+                                            facets.type,
+                                            propName,
+                                        );
+                                    }
+                                    if (
+                                        facets &&
+                                        typeof facets.transform === "function"
+                                    ) {
+                                        nextVal = facets.transform.call(
+                                            recv,
+                                            nextVal,
+                                            propName,
+                                        );
+                                    }
+                                    if (
+                                        facets &&
+                                        typeof facets.validate === "function"
+                                    ) {
+                                        const valid = facets.validate.call(
+                                            recv,
+                                            nextVal,
+                                            propName,
+                                        );
+                                        if (valid === false) {
+                                            throw new Error(
+                                                `Slot validation failed for '${propName}'`,
+                                            );
+                                        }
+                                    }
+                                    const prevVal = recv[backingSymbol];
                                     if (hasAccessor) {
                                         if (originalSet)
-                                            originalSet.call(recv, val);
+                                            originalSet.call(recv, nextVal);
                                     } else {
-                                        recv[backingSymbol] = val;
+                                        recv[backingSymbol] = nextVal;
                                     }
-                                    return val;
+                                    if (
+                                        facets &&
+                                        typeof facets.onChange === "function"
+                                    ) {
+                                        facets.onChange.call(
+                                            recv,
+                                            nextVal,
+                                            prevVal,
+                                            propName,
+                                        );
+                                    }
+                                    return nextVal;
                                 };
                                 primaryPropFn.__originalArity =
                                     hasAccessor && originalGet && !originalSet
@@ -816,6 +1296,7 @@ globalThis.Ouro = (function () {
                                 };
                                 closMethod.__originalArity =
                                     typeof fn === "function" ? fn.length : 0;
+                                closMethod.__originalFn = fn;
 
                                 GenericFunction.defmethod(
                                     name,
@@ -893,6 +1374,7 @@ globalThis.Ouro = (function () {
                                 isPriv,
                             );
                         }
+                        return classConstructor;
                     },
                 },
             },
@@ -904,10 +1386,30 @@ globalThis.Ouro = (function () {
     Metaclass.Private = Bootstrap.PrivateSymbol;
     Metaclass.forge = forgeConstructor;
     Metaclass.forgeConstructor = forgeConstructor;
-    Metaclass.bootstrap = { allocate: Bootstrap.allocate, forgeConstructor };
+    Metaclass.bootstrap = {
+        allocate: Bootstrap.allocate,
+        forgeConstructor,
+        allocateHooks: Bootstrap.allocateHooks,
+        instantiateHooks: Bootstrap.instantiateHooks,
+    };
 
     Class = function (definition) {
-        const className = definition?.[v.name];
+        if (
+            definition &&
+            typeof definition === "object" &&
+            !definition[Bootstrap.RawDefSymbol]
+        ) {
+            definition[Bootstrap.RawDefSymbol] =
+                Bootstrap.cloneRawDefinition(definition);
+        }
+        const className =
+            definition?.[v.name] ||
+            (Ouro_API?.VocabularyAliases &&
+                Object.keys(definition || {}).reduce((acc, k) => {
+                    if (Ouro_API.VocabularyAliases[k] === "name")
+                        return definition[k];
+                    return acc;
+                }, undefined));
         const shouldPublish =
             definition?.publish === true ||
             (definition?.publish !== false &&
@@ -962,14 +1464,50 @@ globalThis.Ouro = (function () {
                         this.qualifier = qualifier;
                         this.isStatic = isStatic;
                     },
-                    getSpecializers: function () {
-                        return this.specializers;
-                    },
-                    getBody: function () {
-                        return this.body;
-                    },
-                    getQualifier: function () {
-                        return this.qualifier;
+                    getSpecificity: function (args) {
+                        return this.specializers.map((spec, i) => {
+                            if (spec === "Any" || spec === undefined)
+                                return -1000;
+                            if (spec === Object) return -500;
+                            if (spec === Function) return -400;
+                            const arg = args[i];
+                            if (arg === spec) return 1000;
+                            if (arg === null || arg === undefined) return -900;
+
+                            if (
+                                i === 0 &&
+                                this.isStatic &&
+                                typeof arg === "function"
+                            ) {
+                                let d = 0;
+                                let curr = arg;
+                                while (curr && curr !== Object) {
+                                    if (curr === spec) return 500 - d;
+                                    curr =
+                                        curr.__meta?.parent ||
+                                        Object.getPrototypeOf(curr);
+                                    d++;
+                                }
+                                return 100;
+                            }
+
+                            let d = 0;
+                            let curr = arg.constructor;
+                            while (curr && curr !== Object) {
+                                if (
+                                    curr === spec ||
+                                    curr.__meta?.nativeParent === spec
+                                ) {
+                                    return 500 - d;
+                                }
+                                curr =
+                                    curr.__meta?.parent ||
+                                    Object.getPrototypeOf(curr.prototype || {})
+                                        ?.constructor;
+                                d++;
+                            }
+                            return 100;
+                        });
                     },
                     isApplicable: function (args) {
                         if (args.length === 0) return false;
@@ -1074,9 +1612,6 @@ globalThis.Ouro = (function () {
                         this.name = name;
                         this.methods = [];
                     },
-                    getMethods: function () {
-                        return this.methods;
-                    },
                     removeMethod: function (qualifier, specializer) {
                         this.methods = this.methods.filter(
                             (m) =>
@@ -1124,6 +1659,21 @@ globalThis.Ouro = (function () {
                             throw new Error(
                                 `No primary method available for '${this.name}'`,
                             );
+                        }
+
+                        if (primaries.length > 1) {
+                            const compareSpec = (a, b) => {
+                                const sa = a.getSpecificity(args);
+                                const sb = b.getSpecificity(args);
+                                const len = Math.max(sa.length, sb.length);
+                                for (let i = 0; i < len; i++) {
+                                    const va = sa[i] ?? -1000;
+                                    const vb = sb[i] ?? -1000;
+                                    if (va !== vb) return vb - va;
+                                }
+                                return 0;
+                            };
+                            primaries.sort(compareSpec);
                         }
 
                         const primary = primaries[0];
@@ -1702,12 +2252,19 @@ globalThis.Ouro = (function () {
     };
 
     // Expose True Shapes to the Mortal Realm
+    Ouro_API.FacetVocabulary = FacetVocabulary;
+    Ouro_API.faceted = Bootstrap.createFaceted;
+    Ouro_API.facetted = Bootstrap.createFaceted;
+    Ouro_API.facet = Bootstrap.createFaceted;
     Ouro_API.publish("Class", Class);
     Ouro_API.publish("Metaclass", Metaclass);
     Ouro_API.publish("GenericFunction", GenericFunction);
     Ouro_API.publish("Method", Method);
     Ouro_API.publish("Extension", Extension);
     Ouro_API.publish("ExtensionPackage", ExtensionPackage);
+    Ouro_API.publish("faceted", Bootstrap.createFaceted);
+    Ouro_API.publish("facetted", Bootstrap.createFaceted);
+    Ouro_API.publish("facet", Bootstrap.createFaceted);
 
     console.info(
         "\n" +
@@ -1736,9 +2293,27 @@ Ouro.syntaxDXExtension = new Ouro.Extension(
     function () {
         const v = Ouro.Vocabulary;
         Ouro.ReservedKeys = new Set(Object.values(Ouro.Vocabulary));
-        Ouro.extendVocabulary = function (semanticKey, stringLiteral) {
-            Ouro.Vocabulary[semanticKey] = stringLiteral;
-            Ouro.ReservedKeys.add(stringLiteral);
+        Ouro.VocabularyAliases = {};
+        for (const [semKey, canonVal] of Object.entries(Ouro.Vocabulary)) {
+            Ouro.VocabularyAliases[canonVal] = semKey;
+        }
+        Ouro.extendVocabulary = function (semanticKey, ...stringLiterals) {
+            if (
+                Ouro.Vocabulary[semanticKey] &&
+                !Ouro.VocabularyAliases[Ouro.Vocabulary[semanticKey]]
+            ) {
+                Ouro.VocabularyAliases[Ouro.Vocabulary[semanticKey]] =
+                    semanticKey;
+            }
+            for (const lit of stringLiterals) {
+                if (!lit || typeof lit !== "string") continue;
+                Ouro.VocabularyAliases[lit] = semanticKey;
+                Ouro.ReservedKeys.add(lit);
+                if (!Ouro.Vocabulary[semanticKey]) {
+                    Ouro.Vocabulary[semanticKey] = lit;
+                }
+            }
+            return Ouro.Vocabulary;
         };
 
         // #10: Forward-Declared / Scaffolded Properties & Methods Registry
@@ -1971,6 +2546,7 @@ Ouro.syntaxDXExtension = new Ouro.Extension(
             }
 
             const baseClass = globalThis.Class({
+                publish: overrides.publish,
                 [v.name]: className,
                 [v.description]:
                     overrides[v.description] ||
@@ -1987,6 +2563,20 @@ Ouro.syntaxDXExtension = new Ouro.Extension(
                 },
             });
 
+            if (baseClass.__meta) {
+                baseClass.__meta.nativeParent = NativeClass;
+            }
+            if (
+                NativeClass.prototype &&
+                !overrides[v.kindOf] &&
+                !overrides.kindOf
+            ) {
+                Object.setPrototypeOf(
+                    baseClass.prototype,
+                    NativeClass.prototype,
+                );
+            }
+
             const extraKeys = Object.keys(overrides).filter(
                 (k) =>
                     ![
@@ -1996,6 +2586,7 @@ Ouro.syntaxDXExtension = new Ouro.Extension(
                         "description",
                         v.kindOf,
                         "kindOf",
+                        "publish",
                     ].includes(k),
             );
             if (extraKeys.length > 0) {
@@ -2066,12 +2657,36 @@ Ouro.schemaNormalizerExtension = new Ouro.Extension(
             );
         };
 
+        const resolveVocabKey = (k) => {
+            const semKey = Ouro.VocabularyAliases?.[k];
+            if (semKey && Ouro.Vocabulary[semKey]) {
+                return Ouro.Vocabulary[semKey];
+            }
+            return k;
+        };
+
         Ouro.normalizeMatrix = function (
             d,
             additionalSkips = [],
             defaultSection = null,
         ) {
             if (!d || typeof d !== "object") return d;
+
+            if (defaultSection === null && Ouro.VocabularyAliases) {
+                for (const k of Object.getOwnPropertyNames(d)) {
+                    const canon = resolveVocabKey(k);
+                    if (
+                        canon !== k &&
+                        canon !== v.properties &&
+                        canon !== v.methods
+                    ) {
+                        if (d[canon] === undefined) {
+                            d[canon] = d[k];
+                        }
+                        delete d[k];
+                    }
+                }
+            }
 
             const strict = Object.fromEntries(
                 Object.entries(Ouro.Vocabulary).map(([key, localizedKey]) => {
@@ -2141,23 +2756,29 @@ Ouro.schemaNormalizerExtension = new Ouro.Extension(
             const walk = (node, context = rootContext) => {
                 if (node === null || typeof node !== "object") return;
 
-                for (const key of Object.getOwnPropertyNames(node)) {
+                for (const rawKey of Object.getOwnPropertyNames(node)) {
+                    const resolved = resolveVocabKey(rawKey);
+                    const key =
+                        resolved === v.properties || resolved === v.methods
+                            ? resolved
+                            : rawKey;
+
                     if (
                         defaultSection === null &&
                         context === rootContext &&
-                        topLevelSkips.includes(key)
+                        topLevelSkips.includes(resolved)
                     )
                         continue;
 
                     const descriptor = Object.getOwnPropertyDescriptor(
                         node,
-                        key,
+                        rawKey,
                     );
                     const isAccessor =
                         descriptor &&
                         (descriptor.get !== undefined ||
                             descriptor.set !== undefined);
-                    const val = isAccessor ? null : node[key];
+                    const val = isAccessor ? null : node[rawKey];
 
                     if (
                         !isAccessor &&
@@ -2218,7 +2839,11 @@ Ouro.schemaNormalizerExtension = new Ouro.Extension(
                         if (isAccessor) {
                             const targetProps =
                                 strict[v.properties][context.visibility][alloc];
-                            Object.defineProperty(targetProps, key, descriptor);
+                            Object.defineProperty(
+                                targetProps,
+                                rawKey,
+                                descriptor,
+                            );
                         } else if (isMethod) {
                             const targetContainer =
                                 context.qualifier !== "primary"
@@ -2228,11 +2853,11 @@ Ouro.schemaNormalizerExtension = new Ouro.Extension(
                                     : strict[v.methods][context.visibility][
                                           alloc
                                       ];
-                            targetContainer[key] = val;
+                            targetContainer[rawKey] = val;
                         } else {
                             const targetProps =
                                 strict[v.properties][context.visibility][alloc];
-                            targetProps[key] = val;
+                            targetProps[rawKey] = val;
                         }
                     }
                 }
@@ -2307,6 +2932,22 @@ Ouro.schemaNormalizerExtension = new Ouro.Extension(
                             )
                                 return;
                             Ouro.normalizeMatrix(definition);
+                            const parent = definition?.[v.kindOf];
+                            if (
+                                typeof parent === "function" &&
+                                parent !== Object &&
+                                !parent.__meta &&
+                                typeof Ouro.fromClass === "function"
+                            ) {
+                                parent.__ouroBridgeClass ??= Ouro.fromClass(
+                                    parent,
+                                    {
+                                        name: `${parent.name || "Native"}Bridge`,
+                                        publish: false,
+                                    },
+                                );
+                                definition[v.kindOf] = parent.__ouroBridgeClass;
+                            }
                         },
                     },
                     instance: {
@@ -2346,8 +2987,8 @@ Ouro.schemaNormalizerExtension = new Ouro.Extension(
 
                             // Find the newly forged class via subclasses or global registry
                             for (const gf of globalThis.GenericFunction._registry.values()) {
-                                for (const m of gf.getMethods()) {
-                                    const spec = m.getSpecializers()[0];
+                                for (const m of gf.methods) {
+                                    const spec = m.specializers[0];
                                     if (
                                         spec &&
                                         spec.__meta &&
@@ -2451,7 +3092,7 @@ Ouro.schemaNormalizerExtension = new Ouro.Extension(
 // 3. Introspection & Reflective Serialization API
 Ouro.introspectionExtension = new Ouro.Extension(
     "Introspection API",
-    "Provides runtime reflection (#7, #10, #13) and GenericFunction-powered blueprint serialization (#8, #17).",
+    "Provides runtime reflection (#7, #10, #13, #19, #20, #21, #23) and GenericFunction-powered blueprint serialization (#8, #17).",
     function () {
         if (
             typeof globalThis.Metaclass === "undefined" ||
@@ -2460,6 +3101,57 @@ Ouro.introspectionExtension = new Ouro.Extension(
             return;
 
         const v = Ouro.Vocabulary;
+
+        // #23: Subclass & Instance tracking hooks outside core allocate
+        const trackAllocation = (rawClass, parentClass, meta) => {
+            meta.subclasses ??= [];
+            meta.instances ??= new WeakSet();
+            if (
+                parentClass &&
+                parentClass !== Object &&
+                parentClass.__meta
+            ) {
+                parentClass.__meta.subclasses ??= [];
+                if (!parentClass.__meta.subclasses.includes(meta.name)) {
+                    parentClass.__meta.subclasses.push(meta.name);
+                }
+            }
+        };
+        const trackInstantiation = (inst) => {
+            const meta = inst?.constructor?.__meta;
+            if (meta) {
+                meta.instances ??= new WeakSet();
+                meta.instances.add(inst);
+            }
+        };
+        Ouro.introspectionExtension._trackAllocation = trackAllocation;
+        Ouro.introspectionExtension._trackInstantiation = trackInstantiation;
+        globalThis.Metaclass.bootstrap?.allocateHooks?.add(trackAllocation);
+        globalThis.Metaclass.bootstrap?.instantiateHooks?.add(
+            trackInstantiation,
+        );
+
+        // Retroactively initialize tracking on already-allocated core classes
+        for (const sym of Ouro.Lexicon || []) {
+            const cls = globalThis[sym];
+            if (typeof cls === "function" && cls.__meta) {
+                trackAllocation(cls, cls.__meta.parent, cls.__meta);
+            }
+        }
+        if (globalThis.Extension?.registry) {
+            for (const ext of globalThis.Extension.registry) {
+                trackInstantiation(ext);
+            }
+        }
+        if (globalThis.GenericFunction?._registry) {
+            for (const gf of globalThis.GenericFunction._registry.values()) {
+                trackInstantiation(gf);
+                for (const m of gf.methods || []) {
+                    trackInstantiation(m);
+                }
+            }
+        }
+
         const NATIVE_FN_PROPS = new Set([
             "length",
             "name",
@@ -2475,6 +3167,8 @@ Ouro.introspectionExtension = new Ouro.Extension(
             "isA",
             "className",
             "addTrait",
+            "toSnapshot",
+            "inspect",
             "__mop_dispatch_stack",
         ]);
 
@@ -2528,17 +3222,26 @@ Ouro.introspectionExtension = new Ouro.Extension(
                     getBlueprint: function () {
                         return this.__private;
                     },
+                    getDefinition: function () {
+                        return this.__private?.class?.definition;
+                    },
                     getSlots: function () {
                         return { ...(this.__meta.slotSymbols || {}) };
+                    },
+                    getSlot: function (propName) {
+                        return this.__meta?.slotSymbols?.[propName];
                     },
                     getForwardDeclarations: function () {
                         const reqKey = v.requires || "requires";
                         const rawDef = this.__private?.class?.definition;
+                        const normDef = this.__meta?.normalizedDefinition;
                         const set = new Set(
                             this.__meta.forwardDeclarations || [],
                         );
-                        if (Array.isArray(rawDef?.[reqKey])) {
-                            for (const req of rawDef[reqKey]) {
+                        const reqList =
+                            rawDef?.[reqKey] || normDef?.[reqKey] || [];
+                        if (Array.isArray(reqList)) {
+                            for (const req of reqList) {
                                 if (
                                     !(req in this.prototype) &&
                                     !(req in this) &&
@@ -2645,7 +3348,8 @@ Ouro.introspectionExtension = new Ouro.Extension(
                                     m.getQualifier() === qualifier &&
                                     Boolean(m.isStatic) === isStatic
                                 ) {
-                                    out[gf.name] = m.getBody();
+                                    const body = m.getBody();
+                                    out[gf.name] = body?.__originalFn || body;
                                 }
                             }
                         }
@@ -2710,16 +3414,6 @@ Ouro.introspectionExtension = new Ouro.Extension(
                             "stringify",
                         ).dispatch(this);
                     },
-                    toString: function () {
-                        const isCore = [
-                            "Metaclass",
-                            "Method",
-                            "GenericFunction",
-                            "Extension",
-                            "ExtensionPackage",
-                        ].includes(this.__meta.name);
-                        return `ƒ <${this.__meta.name}> Class() { [${isCore ? "Standard Library" : "Domain Logic"}] }`;
-                    },
                 },
             },
         });
@@ -2732,7 +3426,7 @@ Ouro.introspectionExtension = new Ouro.Extension(
             "stringify",
             [globalThis.Metaclass],
             function (cls) {
-                const rawDef = cls.__private?.class?.definition || {};
+                const normDef = cls.__meta?.normalizedDefinition || {};
                 const lines = ["Class({"];
                 lines.push(
                     `    ${v.name}: ${JSON.stringify(cls.__meta.name)},`,
@@ -2761,15 +3455,39 @@ Ouro.introspectionExtension = new Ouro.Extension(
                 const privInstProps = cls.getProperties("private", "instance");
                 const privClassProps = cls.getProperties("private", "class");
 
+                const pubInstMethods = {
+                    ...(normDef[v.methods]?.public?.instance || {}),
+                    ...cls.getMethods("public", "instance"),
+                };
+                const pubClassMethods = {
+                    ...(normDef[v.methods]?.public?.class || {}),
+                    ...cls.getMethods("public", "class"),
+                };
+                const privInstMethods = {
+                    ...(normDef[v.methods]?.private?.instance || {}),
+                    ...cls.getMethods("private", "instance"),
+                };
+                const privClassMethods = {
+                    ...(normDef[v.methods]?.private?.class || {}),
+                    ...cls.getMethods("private", "class"),
+                };
+                const advices = cls.getAdvices?.() || {};
+
                 for (const [k, desc] of Object.entries(
                     Object.getOwnPropertyDescriptors(pubInstProps),
                 )) {
                     if ("value" in desc) {
                         lines.push(`    ${k}: ${serializeValue(desc.value)},`);
+                    } else {
+                        if (desc.get) lines.push(`    ${desc.get.toString()},`);
+                        if (desc.set) lines.push(`    ${desc.set.toString()},`);
                     }
                 }
 
-                if (Object.keys(pubClassProps).length > 0) {
+                if (
+                    Object.keys(pubClassProps).length > 0 ||
+                    Object.keys(pubClassMethods).length > 0
+                ) {
                     lines.push("    class: {");
                     for (const [k, desc] of Object.entries(
                         Object.getOwnPropertyDescriptors(pubClassProps),
@@ -2780,12 +3498,17 @@ Ouro.introspectionExtension = new Ouro.Extension(
                             );
                         }
                     }
+                    for (const [mName, fn] of Object.entries(pubClassMethods)) {
+                        lines.push(`        ${mName}: ${serializeValue(fn)},`);
+                    }
                     lines.push("    },");
                 }
 
                 if (
                     Object.keys(privInstProps).length > 0 ||
-                    Object.keys(privClassProps).length > 0
+                    Object.keys(privClassProps).length > 0 ||
+                    Object.keys(privInstMethods).length > 0 ||
+                    Object.keys(privClassMethods).length > 0
                 ) {
                     lines.push("    private: {");
                     for (const [k, desc] of Object.entries(
@@ -2797,7 +3520,13 @@ Ouro.introspectionExtension = new Ouro.Extension(
                             );
                         }
                     }
-                    if (Object.keys(privClassProps).length > 0) {
+                    for (const [mName, fn] of Object.entries(privInstMethods)) {
+                        lines.push(`        ${mName}: ${serializeValue(fn)},`);
+                    }
+                    if (
+                        Object.keys(privClassProps).length > 0 ||
+                        Object.keys(privClassMethods).length > 0
+                    ) {
                         lines.push("        class: {");
                         for (const [k, desc] of Object.entries(
                             Object.getOwnPropertyDescriptors(privClassProps),
@@ -2808,15 +3537,47 @@ Ouro.introspectionExtension = new Ouro.Extension(
                                 );
                             }
                         }
+                        for (const [mName, fn] of Object.entries(
+                            privClassMethods,
+                        )) {
+                            lines.push(
+                                `            ${mName}: ${serializeValue(fn)},`,
+                            );
+                        }
                         lines.push("        },");
                     }
                     lines.push("    },");
                 }
 
-                const rawMethods = rawDef[v.methods]?.public?.instance || {};
-                for (const [mName, fn] of Object.entries(rawMethods)) {
+                for (const [mName, fn] of Object.entries(pubInstMethods)) {
                     if (mName === "addTrait") continue;
                     lines.push(`    ${mName}: ${serializeValue(fn)},`);
+                }
+
+                for (const qual of ["before", "after", "around"]) {
+                    const qInst = advices[qual]?.instance || {};
+                    const qClass = advices[qual]?.class || {};
+                    if (
+                        Object.keys(qInst).length > 0 ||
+                        Object.keys(qClass).length > 0
+                    ) {
+                        lines.push(`    ${qual}: {`);
+                        for (const [mName, fn] of Object.entries(qInst)) {
+                            lines.push(
+                                `        ${mName}: ${serializeValue(fn)},`,
+                            );
+                        }
+                        if (Object.keys(qClass).length > 0) {
+                            lines.push("        class: {");
+                            for (const [mName, fn] of Object.entries(qClass)) {
+                                lines.push(
+                                    `            ${mName}: ${serializeValue(fn)},`,
+                                );
+                            }
+                            lines.push("        },");
+                        }
+                        lines.push("    },");
+                    }
                 }
 
                 lines.push("})");
@@ -2838,6 +3599,7 @@ Ouro.introspectionExtension = new Ouro.Extension(
                 const cls = inst?.constructor;
                 const slots = cls?.__meta?.slotSymbols || {};
                 for (const [propName, slotObj] of Object.entries(slots)) {
+                    if (slotObj?.isStatic) continue;
                     try {
                         out[propName] = inst[propName];
                     } catch (_) {}
@@ -2858,12 +3620,99 @@ Ouro.introspectionExtension = new Ouro.Extension(
         Ouro.stringify = stringifyDispatcher;
         Ouro.publish("stringify", stringifyDispatcher);
 
+        Ouro.audit = function () {
+            const auditTargets = {
+                Class: {
+                    constructor: globalThis.Class,
+                    prototype: globalThis.Class?.prototype,
+                },
+                Metaclass: {
+                    constructor: globalThis.Metaclass,
+                    prototype: globalThis.Metaclass?.prototype,
+                },
+                Method: {
+                    constructor: globalThis.Method,
+                    prototype: globalThis.Method?.prototype,
+                },
+                GenericFunction: {
+                    constructor: globalThis.GenericFunction,
+                    prototype: globalThis.GenericFunction?.prototype,
+                },
+                Slot: {
+                    constructor: globalThis.Slot,
+                    prototype: globalThis.Slot?.prototype,
+                },
+            };
+            const coreFootprint = {};
+            for (const [name, targets] of Object.entries(auditTargets)) {
+                coreFootprint[name] = {
+                    constructorKeys: targets.constructor
+                        ? Reflect.ownKeys(targets.constructor)
+                        : ["[NOT LOADED]"],
+                    prototypeKeys: targets.prototype
+                        ? Reflect.ownKeys(targets.prototype)
+                        : ["[NOT LOADED]"],
+                };
+            }
+
+            const report = {
+                version: Ouro.version,
+                timestamp: new Date().toISOString(),
+                lexicon: Array.from(Ouro.Lexicon || []),
+                coreFootprint,
+                genericFunctions: {},
+                classes: {},
+            };
+            if (globalThis.GenericFunction?._registry) {
+                for (const [
+                    gfName,
+                    gfInstance,
+                ] of globalThis.GenericFunction._registry.entries()) {
+                    report.genericFunctions[gfName] = {
+                        totalMethods: gfInstance.methods.length,
+                        methods: gfInstance.methods.map((m) => ({
+                            qualifier: m.qualifier,
+                            isStatic: m.isStatic,
+                            specializers: m.specializers.map(
+                                (s) =>
+                                    s?.__meta?.name ||
+                                    s?.name ||
+                                    String(s || "Any"),
+                            ),
+                        })),
+                    };
+                }
+            }
+            for (const sym of Ouro.Lexicon || []) {
+                const ref = globalThis[sym];
+                if (typeof ref === "function" && ref.__meta) {
+                    report.classes[sym] = {
+                        name: ref.__meta.name,
+                        kindOf:
+                            ref.__meta.parent?.__meta?.name ||
+                            ref.__meta.parent?.name ||
+                            "Object",
+                        subclasses: [...(ref.__meta.subclasses || [])],
+                        isComplete: ref.isComplete ? ref.isComplete() : true,
+                        requires: ref.getForwardDeclarations
+                            ? ref.getForwardDeclarations()
+                            : [],
+                    };
+                }
+            }
+            return report;
+        };
+        Ouro.publish("audit", Ouro.audit);
+
         if (globalThis.GenericFunction) {
             globalThis.GenericFunction.addMethods({
                 public: {
                     instance: {
-                        toString: function () {
-                            return `[GenericFunction: ${this.name}() routing ${this.methods.length} methods]`;
+                        getName: function () {
+                            return this.name;
+                        },
+                        getMethods: function () {
+                            return this.methods;
                         },
                     },
                 },
@@ -2874,15 +3723,14 @@ Ouro.introspectionExtension = new Ouro.Extension(
             globalThis.Method.addMethods({
                 public: {
                     instance: {
-                        toString: function () {
-                            const specs = this.specializers
-                                .map((s) =>
-                                    s && s.getName
-                                        ? s.getName()
-                                        : s?.name || "Any",
-                                )
-                                .join(", ");
-                            return `[Method: :${this.qualifier} (${specs})]`;
+                        getSpecializers: function () {
+                            return this.specializers;
+                        },
+                        getBody: function () {
+                            return this.body;
+                        },
+                        getQualifier: function () {
+                            return this.qualifier;
                         },
                     },
                 },
@@ -2890,6 +3738,16 @@ Ouro.introspectionExtension = new Ouro.Extension(
         }
     },
     function () {
+        if (Ouro.introspectionExtension._trackAllocation) {
+            globalThis.Metaclass?.bootstrap?.allocateHooks?.delete(
+                Ouro.introspectionExtension._trackAllocation,
+            );
+        }
+        if (Ouro.introspectionExtension._trackInstantiation) {
+            globalThis.Metaclass?.bootstrap?.instantiateHooks?.delete(
+                Ouro.introspectionExtension._trackInstantiation,
+            );
+        }
         const mToRemove = [
             "getName",
             "getKindOf",
@@ -2898,7 +3756,9 @@ Ouro.introspectionExtension = new Ouro.Extension(
             "subclasses",
             "getInstances",
             "getBlueprint",
+            "getDefinition",
             "getSlots",
+            "getSlot",
             "getForwardDeclarations",
             "isComplete",
             "getProperties",
@@ -2906,15 +3766,35 @@ Ouro.introspectionExtension = new Ouro.Extension(
             "getAdvices",
             "getAttachedMethods",
             "stringify",
-            "toString",
         ];
         if (globalThis.Metaclass?.prototype)
             mToRemove.forEach((m) => delete globalThis.Metaclass.prototype[m]);
-        if (globalThis.GenericFunction?.prototype)
-            delete globalThis.GenericFunction.prototype.toString;
-        if (globalThis.Method?.prototype)
-            delete globalThis.Method.prototype.toString;
+        if (globalThis.GenericFunction?.prototype) {
+            delete globalThis.GenericFunction.prototype.getName;
+            delete globalThis.GenericFunction.prototype.getMethods;
+            globalThis.GenericFunction._registry
+                ?.get("getName")
+                ?.removeMethod("primary", globalThis.GenericFunction);
+            globalThis.GenericFunction._registry
+                ?.get("getMethods")
+                ?.removeMethod("primary", globalThis.GenericFunction);
+        }
+        if (globalThis.Method?.prototype) {
+            delete globalThis.Method.prototype.getSpecializers;
+            delete globalThis.Method.prototype.getBody;
+            delete globalThis.Method.prototype.getQualifier;
+            globalThis.GenericFunction?._registry
+                ?.get("getSpecializers")
+                ?.removeMethod("primary", globalThis.Method);
+            globalThis.GenericFunction?._registry
+                ?.get("getBody")
+                ?.removeMethod("primary", globalThis.Method);
+            globalThis.GenericFunction?._registry
+                ?.get("getQualifier")
+                ?.removeMethod("primary", globalThis.Method);
+        }
         delete Ouro.stringify;
+        delete Ouro.audit;
     },
 );
 
@@ -2980,190 +3860,182 @@ Ouro.traitSystemExtension = new Ouro.Extension(
             return result;
         };
 
-        Ouro.publish(
-            "Trait",
-            globalThis.Class({
-                name: "Trait",
-                description:
-                    "A first-class Metaobject representing a reusable behavioral blueprint.",
-                properties: {
-                    public: {
-                        instance: {
-                            name: "AnonymousTrait",
-                            matrix: {},
-                            isNativeDelegation: false,
-                        },
+        globalThis.Class({
+            name: "Trait",
+            publish: true,
+            description:
+                "A first-class Metaobject representing a reusable behavioral blueprint.",
+            properties: {
+                public: {
+                    instance: {
+                        name: "AnonymousTrait",
+                        matrix: {},
+                        isNativeDelegation: false,
                     },
                 },
-                methods: {
-                    public: {
-                        instance: {
-                            initialize: function (definition) {
-                                if (!definition)
-                                    throw new Error(
-                                        "Trait requires a definition matrix.",
+            },
+            methods: {
+                public: {
+                    instance: {
+                        initialize: function (definition) {
+                            if (!definition)
+                                throw new Error(
+                                    "Trait requires a definition matrix.",
+                                );
+                            if (typeof Ouro.normalizeMatrix === "function") {
+                                Ouro.normalizeMatrix(definition, [
+                                    "native",
+                                    "delegateTo",
+                                    "only",
+                                    "alias",
+                                ]);
+                            }
+                            this.name = definition.name || this.name;
+                            this.matrix = definition;
+
+                            if (
+                                !definition.native &&
+                                (definition.publish === true ||
+                                    (definition.publish !== false &&
+                                        this.name &&
+                                        this.name !== "AnonymousTrait" &&
+                                        globalThis[this.name] === undefined)) &&
+                                typeof Ouro.publish === "function"
+                            ) {
+                                Ouro.publish(this.name, this);
+                            }
+
+                            if (definition.native) {
+                                this.isNativeDelegation = true;
+                                this.matrix.properties =
+                                    this.matrix.properties || {};
+                                this.matrix.properties.public =
+                                    this.matrix.properties.public || {};
+                                this.matrix.properties.public.instance =
+                                    this.matrix.properties.public.instance ||
+                                    {};
+                                var props =
+                                    this.matrix.properties.public.instance;
+
+                                this.matrix.methods = this.matrix.methods || {};
+                                this.matrix.methods.public =
+                                    this.matrix.methods.public || {};
+                                this.matrix.methods.public.instance =
+                                    this.matrix.methods.public.instance || {};
+                                var meths = this.matrix.methods.public.instance;
+
+                                var proto = definition.native.prototype;
+                                var keys =
+                                    definition.only ||
+                                    collectNativePrototypeKeys(
+                                        definition.native,
                                     );
-                                if (
-                                    typeof Ouro.normalizeMatrix === "function"
-                                ) {
-                                    Ouro.normalizeMatrix(definition, [
-                                        "native",
-                                        "delegateTo",
-                                        "only",
-                                        "alias",
-                                    ]);
-                                }
-                                this.name = definition.name || this.name;
-                                this.matrix = definition;
+                                var aliasMap = definition.alias || {};
 
-                                if (definition.native) {
-                                    this.isNativeDelegation = true;
-                                    this.matrix.properties =
-                                        this.matrix.properties || {};
-                                    this.matrix.properties.public =
-                                        this.matrix.properties.public || {};
-                                    this.matrix.properties.public.instance =
-                                        this.matrix.properties.public
-                                            .instance || {};
-                                    var props =
-                                        this.matrix.properties.public.instance;
+                                var delStr =
+                                    definition.delegateTo ||
+                                    "this.nativeObject";
+                                var isMethod = delStr.indexOf("()") > -1;
+                                var targetName = delStr
+                                    .replace("()", "")
+                                    .replace("this.", "");
 
-                                    this.matrix.methods =
-                                        this.matrix.methods || {};
-                                    this.matrix.methods.public =
-                                        this.matrix.methods.public || {};
-                                    this.matrix.methods.public.instance =
-                                        this.matrix.methods.public.instance ||
-                                        {};
-                                    var meths =
-                                        this.matrix.methods.public.instance;
-
-                                    var proto = definition.native.prototype;
-                                    var keys =
-                                        definition.only ||
-                                        collectNativePrototypeKeys(
-                                            definition.native,
-                                        );
-                                    var aliasMap = definition.alias || {};
-
-                                    var delStr =
-                                        definition.delegateTo ||
-                                        "this.nativeObject";
-                                    var isMethod = delStr.indexOf("()") > -1;
-                                    var targetName = delStr
-                                        .replace("()", "")
-                                        .replace("this.", "");
-
-                                    var getTarget = function (ctx) {
-                                        return isMethod
-                                            ? ctx[targetName]()
-                                            : ctx[targetName];
-                                    };
-
-                                    keys.forEach(function (key) {
-                                        if (key === "constructor") return;
-                                        var finalKey = aliasMap[key] || key;
-                                        var desc;
-                                        var currentProto = proto;
-
-                                        while (currentProto && !desc) {
-                                            desc =
-                                                Object.getOwnPropertyDescriptor(
-                                                    currentProto,
-                                                    key,
-                                                );
-                                            currentProto =
-                                                Object.getPrototypeOf(
-                                                    currentProto,
-                                                );
-                                        }
-
-                                        if (
-                                            desc &&
-                                            typeof desc.value === "function"
-                                        ) {
-                                            meths[finalKey] = function () {
-                                                var target = getTarget(this);
-                                                if (!target) return undefined;
-                                                return target[key].apply(
-                                                    target,
-                                                    arguments,
-                                                );
-                                            };
-                                        } else {
-                                            Object.defineProperty(
-                                                props,
-                                                finalKey,
-                                                {
-                                                    get: function () {
-                                                        var target =
-                                                            getTarget(this);
-                                                        return target
-                                                            ? target[key]
-                                                            : undefined;
-                                                    },
-                                                    set: function (val) {
-                                                        var target =
-                                                            getTarget(this);
-                                                        if (target)
-                                                            target[key] = val;
-                                                    },
-                                                    enumerable: true,
-                                                    configurable: true,
-                                                },
-                                            );
-                                        }
-                                    });
-                                }
-                            },
-                            getMatrix: function () {
-                                return this.matrix;
-                            },
-                        },
-                        class: {
-                            native: function (nativeConstructor, config) {
-                                config = config || {};
-                                var prefix =
-                                    config.state ||
-                                    "native" +
-                                        (nativeConstructor.name || "Object");
-                                var privateKey = "_" + prefix + "Object";
-                                var publicAccessor = prefix;
-
-                                var traitDef = {
-                                    name:
-                                        "InlineNative" +
-                                        (nativeConstructor.name || "Object") +
-                                        "_" +
-                                        prefix,
-                                    native: nativeConstructor,
-                                    delegateTo: "this." + publicAccessor + "()",
-                                    only:
-                                        config.only ||
-                                        collectNativePrototypeKeys(
-                                            nativeConstructor,
-                                        ),
-                                    alias: config.alias || {},
-                                    properties: { private: { instance: {} } },
-                                    methods: { public: { instance: {} } },
+                                var getTarget = function (ctx) {
+                                    return isMethod
+                                        ? ctx[targetName]()
+                                        : ctx[targetName];
                                 };
 
-                                traitDef.properties.private.instance[
-                                    privateKey
-                                ] = null;
-                                traitDef.methods.public.instance[
-                                    publicAccessor
-                                ] = function () {
+                                keys.forEach(function (key) {
+                                    if (key === "constructor") return;
+                                    var finalKey = aliasMap[key] || key;
+                                    var desc;
+                                    var currentProto = proto;
+
+                                    while (currentProto && !desc) {
+                                        desc = Object.getOwnPropertyDescriptor(
+                                            currentProto,
+                                            key,
+                                        );
+                                        currentProto =
+                                            Object.getPrototypeOf(currentProto);
+                                    }
+
+                                    if (
+                                        desc &&
+                                        typeof desc.value === "function"
+                                    ) {
+                                        meths[finalKey] = function () {
+                                            var target = getTarget(this);
+                                            if (!target) return undefined;
+                                            return target[key].apply(
+                                                target,
+                                                arguments,
+                                            );
+                                        };
+                                    } else {
+                                        Object.defineProperty(props, finalKey, {
+                                            get: function () {
+                                                var target = getTarget(this);
+                                                return target
+                                                    ? target[key]
+                                                    : undefined;
+                                            },
+                                            set: function (val) {
+                                                var target = getTarget(this);
+                                                if (target) target[key] = val;
+                                            },
+                                            enumerable: true,
+                                            configurable: true,
+                                        });
+                                    }
+                                });
+                            }
+                        },
+                        getMatrix: function () {
+                            return this.matrix;
+                        },
+                    },
+                    class: {
+                        native: function (nativeConstructor, config) {
+                            config = config || {};
+                            var prefix =
+                                config.state ||
+                                "native" + (nativeConstructor.name || "Object");
+                            var privateKey = "_" + prefix + "Object";
+                            var publicAccessor = prefix;
+
+                            var traitDef = {
+                                name:
+                                    "InlineNative" +
+                                    (nativeConstructor.name || "Object") +
+                                    "_" +
+                                    prefix,
+                                native: nativeConstructor,
+                                delegateTo: "this." + publicAccessor + "()",
+                                only:
+                                    config.only ||
+                                    collectNativePrototypeKeys(
+                                        nativeConstructor,
+                                    ),
+                                alias: config.alias || {},
+                                properties: { private: { instance: {} } },
+                                methods: { public: { instance: {} } },
+                            };
+
+                            traitDef.properties.private.instance[privateKey] =
+                                null;
+                            traitDef.methods.public.instance[publicAccessor] =
+                                function () {
                                     return this[privateKey];
                                 };
 
-                                return new globalThis.Trait(traitDef);
-                            },
+                            return new globalThis.Trait(traitDef);
                         },
                     },
                 },
-            }),
-        );
+            },
+        });
 
         const instanceAddTrait = function (traitConfig) {
             const targetInstance = this;
@@ -3501,9 +4373,10 @@ Ouro.cachingSystemExtension = new Ouro.Extension(
             },
         };
 
-        const createStorageTrait = (driver) => {
-            return new globalThis.Trait({
-                name: `StorageTrait_${driver.name}`,
+        const createStorageTrait = (driver, aliases = []) => {
+            const trait = new globalThis.Trait({
+                name: driver.name,
+                publish: true,
                 properties: {
                     public: {
                         shared: {
@@ -3656,20 +4529,15 @@ Ouro.cachingSystemExtension = new Ouro.Extension(
                     },
                 },
             });
+            for (const alias of aliases) {
+                Ouro.publish(alias, trait);
+            }
+            return trait;
         };
 
-        const LocalCacheable = createStorageTrait(LocalDriver);
-        Ouro.publish("LocalCacheable", LocalCacheable);
-        Ouro.publish("localCache", LocalCacheable);
-        Ouro.publish("domainCache", LocalCacheable);
-
-        const SessionCacheable = createStorageTrait(SessionDriver);
-        Ouro.publish("SessionCacheable", SessionCacheable);
-        Ouro.publish("sessionCache", SessionCacheable);
-
-        const GlobalCacheable = createStorageTrait(GlobalDriver);
-        Ouro.publish("GlobalCacheable", GlobalCacheable);
-        Ouro.publish("globalCache", GlobalCacheable);
+        createStorageTrait(LocalDriver, ["LocalCacheable", "domainCache"]);
+        createStorageTrait(SessionDriver, ["SessionCacheable"]);
+        createStorageTrait(GlobalDriver, ["GlobalCacheable"]);
 
         const WithKey = (keyExtractor) => {
             const safeKeyName =
@@ -3678,6 +4546,7 @@ Ouro.cachingSystemExtension = new Ouro.Extension(
                     : "Dynamic";
             return new globalThis.Trait({
                 name: `WithKey_${safeKeyName}`,
+                publish: false,
                 methods: {
                     private: {
                         instance: {
@@ -3719,6 +4588,7 @@ Ouro.cachingSystemExtension = new Ouro.Extension(
         ) =>
             new globalThis.Trait({
                 name: `Cacheable_${methodName}`,
+                publish: false,
                 traits: [StorageTrait, WithKey(keyExtractor)],
                 around: {
                     async [methodName](...args) {
@@ -3819,10 +4689,10 @@ Ouro.cachingSystemExtension = new Ouro.Extension(
     },
 );
 
-// 6. DevTools Display Sugar Extension (#9)
+// 6. DevTools Display Sugar Extension (#9, #22, #23)
 Ouro.devtoolsExtension = new Ouro.Extension(
     "DevTools Display Sugar",
-    "Custom formatting, clean slot snapshot inspection, and browser DevTools formatter registration for Ouro classes and instances.",
+    "Custom formatting, clean slot snapshot inspection, toString sugar, and browser DevTools formatter registration for Ouro classes and instances.",
     function () {
         const snapshotInstance = function (inst) {
             if (!inst || typeof inst !== "object") return inst;
@@ -3830,7 +4700,8 @@ Ouro.devtoolsExtension = new Ouro.Extension(
             let curr = inst.constructor;
             while (curr && curr.__meta) {
                 const slots = curr.__meta.slotSymbols || {};
-                for (const propName of Object.keys(slots)) {
+                for (const [propName, slotObj] of Object.entries(slots)) {
+                    if (slotObj?.isStatic) continue;
                     if (!(propName in out)) {
                         try {
                             out[propName] = inst[propName];
@@ -3846,67 +4717,378 @@ Ouro.devtoolsExtension = new Ouro.Extension(
             return out;
         };
 
-        if (globalThis.Metaclass) {
+        // #23: Mount toSnapshot and inspect on prototypes outside core allocate
+        const mountPrototypeHelpers = (rawClass) => {
+            if (!rawClass || !rawClass.prototype) return;
+            if (!("toSnapshot" in rawClass.prototype)) {
+                Object.defineProperty(rawClass.prototype, "toSnapshot", {
+                    value: function () {
+                        return typeof Ouro.snapshot === "function"
+                            ? Ouro.snapshot(this)
+                            : { ...this };
+                    },
+                    writable: true,
+                    configurable: true,
+                    enumerable: false,
+                });
+            }
+            if (!("inspect" in rawClass.prototype)) {
+                Object.defineProperty(rawClass.prototype, "inspect", {
+                    value: function (options) {
+                        return typeof Ouro.inspect === "function"
+                            ? Ouro.inspect(this, options)
+                            : this.toSnapshot();
+                    },
+                    writable: true,
+                    configurable: true,
+                    enumerable: false,
+                });
+            }
+        };
+        Ouro.devtoolsExtension._mountPrototypeHelpers = mountPrototypeHelpers;
+        globalThis.Metaclass?.bootstrap?.allocateHooks?.add(
+            mountPrototypeHelpers,
+        );
+        for (const sym of Ouro.Lexicon || []) {
+            const cls = globalThis[sym];
+            if (typeof cls === "function" && cls.__meta) {
+                mountPrototypeHelpers(cls);
+            }
+        }
+
+        if (globalThis.Metaclass && globalThis.GenericFunction) {
+            const inspectGF = globalThis.GenericFunction.defgeneric("inspect");
+
             globalThis.Metaclass.addMethods({
                 public: {
                     instance: {
-                        inspect: function () {
-                            return {
-                                class: this.__meta?.name,
-                                kindOf:
-                                    this.__meta?.parent?.__meta?.name ||
-                                    this.__meta?.parent?.name ||
-                                    "Object",
-                                subclasses: [
-                                    ...(this.__meta?.subclasses || []),
-                                ],
-                                properties: this.getProperties
-                                    ? this.getProperties("public", "instance")
-                                    : {},
-                                classProperties: this.getProperties
-                                    ? this.getProperties("public", "class")
-                                    : {},
-                                methods: this.getMethods
-                                    ? Object.keys(
-                                          this.getMethods("public", "instance"),
-                                      )
-                                    : [],
-                                requires: this.getForwardDeclarations
-                                    ? this.getForwardDeclarations()
-                                    : [],
-                            };
+                        toString: function () {
+                            const isCore = [
+                                "Metaclass",
+                                "Method",
+                                "GenericFunction",
+                                "Extension",
+                                "ExtensionPackage",
+                            ].includes(this.__meta.name);
+                            return `ƒ <${this.__meta.name}> Class() { [${isCore ? "Standard Library" : "Domain Logic"}] }`;
                         },
-                    },
-                },
-                after: {
-                    class: {
-                        forge: function (definition) {
-                            const v = Ouro.Vocabulary;
-                            const className = definition?.[v.name];
-                            if (!className) return;
-                            const cls = globalThis[className];
-                            if (
-                                cls &&
-                                cls.prototype &&
-                                !("toSnapshot" in cls.prototype)
-                            ) {
-                                Object.defineProperty(
-                                    cls.prototype,
-                                    "toSnapshot",
-                                    {
-                                        value: function () {
-                                            return snapshotInstance(this);
-                                        },
-                                        writable: true,
-                                        configurable: true,
-                                        enumerable: false,
-                                    },
-                                );
+                        inspect: function (options = {}) {
+                            const cls = this;
+                            const subclassNames = [
+                                ...(cls.__meta?.subclasses || []),
+                            ];
+                            const subclassRefs = {};
+                            for (const subName of subclassNames) {
+                                if (globalThis[subName]) {
+                                    subclassRefs[subName] = globalThis[subName];
+                                }
                             }
+                            const slots = {};
+                            let curr = cls;
+                            while (curr && curr.__meta) {
+                                const ownSlots = curr.__meta.slotSymbols || {};
+                                for (const [sName, sMeta] of Object.entries(
+                                    ownSlots,
+                                )) {
+                                    if (!(sName in slots)) {
+                                        slots[sName] = sMeta;
+                                    }
+                                }
+                                curr = curr.__meta.parent;
+                            }
+                            const pubInstMethodsDict = cls.getMethods
+                                ? cls.getMethods("public", "instance")
+                                : {};
+                            const pubClassMethodsDict = cls.getMethods
+                                ? cls.getMethods("public", "class")
+                                : {};
+                            const privInstMethodsDict = cls.getMethods
+                                ? cls.getMethods("private", "instance")
+                                : {};
+                            const advices = cls.getAdvices
+                                ? cls.getAdvices()
+                                : {};
+
+                            const report = {
+                                class: cls.__meta?.name,
+                                superclass: cls.__meta?.parent || Object,
+                                kindOf:
+                                    cls.__meta?.parent?.__meta?.name ||
+                                    cls.__meta?.parent?.name ||
+                                    "Object",
+                                subclasses: subclassNames,
+                                subclassRefs,
+                                slots,
+                                properties: cls.getProperties
+                                    ? cls.getProperties("public", "instance")
+                                    : {},
+                                classProperties: cls.getProperties
+                                    ? cls.getProperties("public", "class")
+                                    : {},
+                                privateProperties: cls.getProperties
+                                    ? cls.getProperties("private", "instance")
+                                    : {},
+                                methods: Object.keys(pubInstMethodsDict),
+                                methodsDictionary: pubInstMethodsDict,
+                                classMethods: Object.keys(pubClassMethodsDict),
+                                classMethodsDictionary: pubClassMethodsDict,
+                                privateMethods:
+                                    Object.keys(privInstMethodsDict),
+                                privateMethodsDictionary: privInstMethodsDict,
+                                advices,
+                                requires: cls.getForwardDeclarations
+                                    ? cls.getForwardDeclarations()
+                                    : [],
+                                isComplete: cls.isComplete
+                                    ? cls.isComplete()
+                                    : true,
+                                meta: cls.__meta,
+                                rawClass: cls,
+                            };
+                            if (options?.log) {
+                                console.group(
+                                    `%c[Ouro Unit Frame Inspector] Class: ${report.class} (kindOf ${report.kindOf})`,
+                                    "color: #00ffcc; font-weight: bold; font-size: 13px;",
+                                );
+                                console.group("📂 Public Instance Slots:");
+                                console.table(report.properties);
+                                console.groupEnd();
+                                if (
+                                    Object.keys(report.classProperties).length >
+                                    0
+                                ) {
+                                    console.group("🏛️ Class (Static) Slots:");
+                                    console.table(report.classProperties);
+                                    console.groupEnd();
+                                }
+                                if (
+                                    Object.keys(report.privateProperties)
+                                        .length > 0
+                                ) {
+                                    console.group("🔒 Private Slots:");
+                                    console.table(report.privateProperties);
+                                    console.groupEnd();
+                                }
+                                console.group("🎰 Slot Metaobjects & Facets:");
+                                console.log(report.slots);
+                                console.groupEnd();
+                                console.group("⚙️ Methods & Advices:");
+                                console.log({
+                                    instance: report.methodsDictionary,
+                                    class: report.classMethodsDictionary,
+                                    private: report.privateMethodsDictionary,
+                                    advices: report.advices,
+                                });
+                                console.groupEnd();
+                                console.group("🧬 Metaobject (__meta):");
+                                console.log(report.meta);
+                                console.groupEnd();
+                                console.groupEnd();
+                            }
+                            return report;
                         },
                     },
                 },
             });
+
+            globalThis.GenericFunction.defmethod(
+                "inspect",
+                [Object],
+                function (instance, options = {}) {
+                    if (
+                        instance &&
+                        typeof instance === "function" &&
+                        instance.__meta
+                    ) {
+                        return instance.inspect(options);
+                    }
+                    const ctor = instance?.constructor;
+                    const meta = ctor?.__meta;
+                    if (!meta) return snapshotInstance(instance);
+
+                    const lineage = [];
+                    const lineageClasses = [];
+                    let currClass = ctor;
+                    while (currClass && currClass.__meta) {
+                        lineage.push(currClass.__meta.name);
+                        lineageClasses.push(currClass);
+                        currClass = currClass.__meta.parent;
+                    }
+                    lineage.push("Object");
+                    lineageClasses.push(Object);
+
+                    const publicProperties = snapshotInstance(instance);
+                    const privateVault = {};
+                    const privSym = globalThis.Metaclass?.Private;
+                    const vault = privSym ? instance[privSym] : null;
+                    if (vault && typeof vault === "object") {
+                        for (const k of Object.keys(vault)) {
+                            if (typeof vault[k] !== "function") {
+                                privateVault[k] = vault[k];
+                            }
+                        }
+                    }
+                    for (const k of Object.getOwnPropertyNames(instance)) {
+                        if (
+                            k.startsWith("_") &&
+                            k !== "__mop_dispatch_stack" &&
+                            !(k in privateVault)
+                        ) {
+                            privateVault[k] = instance[k];
+                        }
+                    }
+
+                    const slots = {};
+                    let slotCursor = ctor;
+                    while (slotCursor && slotCursor.__meta) {
+                        const ownSlots = slotCursor.__meta.slotSymbols || {};
+                        for (const [sName, sMeta] of Object.entries(ownSlots)) {
+                            if (!sMeta?.isStatic && !(sName in slots)) {
+                                slots[sName] = sMeta;
+                            }
+                        }
+                        slotCursor = slotCursor.__meta.parent;
+                    }
+
+                    const methods = [];
+                    const methodsDictionary = {};
+                    let proto = Object.getPrototypeOf(instance);
+                    const seenMethods = new Set([
+                        "constructor",
+                        "initialize",
+                        "isA",
+                        "className",
+                        "addTrait",
+                        "toSnapshot",
+                        "inspect",
+                    ]);
+                    while (proto && proto !== Object.prototype) {
+                        const origin =
+                            proto.constructor?.__meta?.name ||
+                            proto.constructor?.name ||
+                            "Unknown";
+                        for (const k of Object.getOwnPropertyNames(proto)) {
+                            if (seenMethods.has(k)) continue;
+                            const desc = Object.getOwnPropertyDescriptor(
+                                proto,
+                                k,
+                            );
+                            if (!desc) continue;
+                            if (typeof desc.value === "function") {
+                                seenMethods.add(k);
+                                methods.push({ method: k, definedIn: origin });
+                                methodsDictionary[k] = {
+                                    fn: desc.value,
+                                    genericFunction:
+                                        globalThis.GenericFunction?._registry?.get(
+                                            k,
+                                        ) || null,
+                                    definedIn: proto.constructor || origin,
+                                };
+                            } else if (
+                                (desc.get || desc.set) &&
+                                !(k in slots)
+                            ) {
+                                seenMethods.add(k);
+                                methodsDictionary[k] = {
+                                    getter: desc.get,
+                                    setter: desc.set,
+                                    type: "Accessor (Getter/Setter)",
+                                    definedIn: proto.constructor || origin,
+                                };
+                            }
+                        }
+                        proto = Object.getPrototypeOf(proto);
+                    }
+
+                    const report = {
+                        className: meta.name,
+                        class: ctor,
+                        lineage,
+                        lineageClasses,
+                        publicProperties,
+                        publicState: publicProperties,
+                        privateVault,
+                        privateState: privateVault,
+                        slots,
+                        methods,
+                        methodsDictionary,
+                        meta,
+                        rawInstance: instance,
+                    };
+
+                    if (options?.log) {
+                        console.group(
+                            `%c[Ouro Reflection Inspector] Instance of ${meta.name}`,
+                            "color: #4285F4; font-weight: bold; font-size: 13px;",
+                        );
+                        console.log("🧬 Lineage:", lineage.join(" -> "), lineageClasses);
+                        console.group("📂 Public State / Slots:");
+                        console.table(publicProperties);
+                        console.groupEnd();
+                        if (Object.keys(privateVault).length > 0) {
+                            console.group("🔒 Private State (Vault & Internal Slots):");
+                            console.table(privateVault);
+                            console.groupEnd();
+                        }
+                        console.group("🎰 Slot Metaobjects & Facets:");
+                        console.log(slots);
+                        console.groupEnd();
+                        console.group("⚙️ Methods & Accessors Dictionary:");
+                        console.log(methodsDictionary);
+                        console.groupEnd();
+                        console.group("🧬 Metaobject Info (__meta):");
+                        console.log(meta);
+                        console.groupEnd();
+                        console.groupEnd();
+                    }
+
+                    return report;
+                },
+                "primary",
+                false,
+            );
+
+            const inspectDispatcher = function (target, options) {
+                if (target && typeof target === "function" && target.__meta) {
+                    return target.inspect(options);
+                }
+                return inspectGF.dispatch(target, options);
+            };
+            Ouro.inspect = inspectDispatcher;
+            Ouro.publish("inspect", inspectDispatcher);
+
+            // #22: Consolidate toString sugar on GenericFunction and Method in DevTools Extension
+            globalThis.GenericFunction.addMethods({
+                public: {
+                    instance: {
+                        toString: function () {
+                            return `[GenericFunction: ${this.name}() routing ${this.methods.length} methods]`;
+                        },
+                    },
+                },
+            });
+
+            if (globalThis.Method) {
+                globalThis.Method.addMethods({
+                    public: {
+                        instance: {
+                            toString: function () {
+                                const specs = this.specializers
+                                    .map((s) =>
+                                        s && s.getName
+                                            ? s.getName()
+                                            : s?.__meta?.name ||
+                                              s?.name ||
+                                              "Any",
+                                    )
+                                    .join(", ");
+                                return `[Method: :${this.qualifier} (${specs})]`;
+                            },
+                        },
+                    },
+                });
+            }
         }
 
         Ouro.snapshot = snapshotInstance;
@@ -3914,17 +5096,163 @@ Ouro.devtoolsExtension = new Ouro.Extension(
         if (typeof globalThis.window !== "undefined") {
             globalThis.window.devtoolsFormatters =
                 globalThis.window.devtoolsFormatters || [];
+
+            const style = {
+                unit: "color: #00ffcc; font-weight: bold;",
+                instance: "color: #85ffc7; font-weight: bold;",
+                slot: "color: #ffaa00; font-weight: bold;",
+                gf: "color: #bb86fc; font-weight: bold;",
+                method: "color: #64b5f6; font-weight: bold;",
+                trait: "color: #f48fb1; font-weight: bold;",
+                muted: "color: #888; font-weight: normal;",
+                key: "color: #a5d6ff; font-weight: bold;",
+                section: "margin-left: 14px; line-height: 1.45;",
+            };
+
+            const row = (label, valueObj, labelStyle = style.key) => [
+                "div",
+                { style: style.section },
+                ["span", { style: labelStyle }, `${label}: `],
+                valueObj !== null &&
+                (typeof valueObj === "object" || typeof valueObj === "function")
+                    ? ["object", { object: valueObj }]
+                    : ["span", { style: style.muted }, String(valueObj)],
+            ];
+
             const ouroFormatter = {
                 __ouroFormatter: true,
                 header: function (obj) {
                     if (!obj) return null;
+
+                    // 1. Ouro Class / Unit Frame
                     if (typeof obj === "function" && obj.__meta) {
+                        const parentName =
+                            obj.__meta.parent?.__meta?.name ||
+                            obj.__meta.parent?.name ||
+                            "Object";
+                        const subCount = (obj.__meta.subclasses || []).length;
                         return [
                             "span",
-                            { style: "color: #00ffcc; font-weight: bold;" },
-                            `ƒ <${obj.__meta.name}> Class`,
+                            {},
+                            [
+                                "span",
+                                { style: style.unit },
+                                `ƒ <${obj.__meta.name}>`,
+                            ],
+                            [
+                                "span",
+                                { style: style.muted },
+                                ` [Unit :kindOf ${parentName}${subCount ? ` | ${subCount} subclasses` : ""}]`,
+                            ],
                         ];
                     }
+
+                    // 2. Slot Metaobject
+                    if (
+                        globalThis.Slot &&
+                        obj instanceof globalThis.Slot &&
+                        obj !== globalThis.Slot.prototype
+                    ) {
+                        const facets = [];
+                        if (obj.type)
+                            facets.push(
+                                `type:${obj.type?.__meta?.name || obj.type?.name || obj.type}`,
+                            );
+                        if (obj.ifNeeded) facets.push(":ifNeeded");
+                        if (obj.onChange) facets.push(":onChange");
+                        if (obj.transform) facets.push(":transform");
+                        if (obj.validate) facets.push(":validate");
+                        return [
+                            "span",
+                            {},
+                            [
+                                "span",
+                                { style: style.slot },
+                                `[Slot ${obj.name}]`,
+                            ],
+                            [
+                                "span",
+                                { style: style.muted },
+                                ` (${obj.visibility || "public"} ${obj.allocation || "instance"}${facets.length ? " | " + facets.join(" ") : ""})`,
+                            ],
+                        ];
+                    }
+
+                    // 3. GenericFunction
+                    if (
+                        globalThis.GenericFunction &&
+                        obj instanceof globalThis.GenericFunction &&
+                        obj !== globalThis.GenericFunction.prototype
+                    ) {
+                        return [
+                            "span",
+                            {},
+                            [
+                                "span",
+                                { style: style.gf },
+                                `[GenericFunction ${obj.name}()]`,
+                            ],
+                            [
+                                "span",
+                                { style: style.muted },
+                                ` (${(obj.methods || []).length} methods)`,
+                            ],
+                        ];
+                    }
+
+                    // 4. Method Metaobject
+                    if (
+                        globalThis.Method &&
+                        obj instanceof globalThis.Method &&
+                        obj !== globalThis.Method.prototype
+                    ) {
+                        const specs = (obj.specializers || [])
+                            .map(
+                                (s) =>
+                                    s?.__meta?.name || s?.name || "Any",
+                            )
+                            .join(", ");
+                        return [
+                            "span",
+                            {},
+                            [
+                                "span",
+                                { style: style.method },
+                                `[Method :${obj.qualifier}]`,
+                            ],
+                            [
+                                "span",
+                                { style: style.muted },
+                                ` (${specs})${obj.isStatic ? " [static]" : ""}`,
+                            ],
+                        ];
+                    }
+
+                    // 5. Trait Metaobject
+                    if (
+                        globalThis.Trait &&
+                        obj instanceof globalThis.Trait &&
+                        obj !== globalThis.Trait.prototype
+                    ) {
+                        return [
+                            "span",
+                            {},
+                            [
+                                "span",
+                                { style: style.trait },
+                                `[Trait ${obj.name || "Anonymous"}]`,
+                            ],
+                            [
+                                "span",
+                                { style: style.muted },
+                                obj.requires?.length
+                                    ? ` requires: [${obj.requires.join(", ")}]`
+                                    : "",
+                            ],
+                        ];
+                    }
+
+                    // 6. General Ouro Instance Frame
                     if (
                         typeof obj === "object" &&
                         obj.constructor?.__meta &&
@@ -3932,11 +5260,15 @@ Ouro.devtoolsExtension = new Ouro.Extension(
                     ) {
                         return [
                             "span",
-                            { style: "color: #85ffc7;" },
-                            `${obj.constructor.__meta.name} `,
+                            {},
                             [
                                 "span",
-                                { style: "color: #aaa; font-weight: normal;" },
+                                { style: style.instance },
+                                `<${obj.constructor.__meta.name}> `,
+                            ],
+                            [
+                                "span",
+                                { style: style.muted },
                                 JSON.stringify(snapshotInstance(obj)),
                             ],
                         ];
@@ -3946,34 +5278,141 @@ Ouro.devtoolsExtension = new Ouro.Extension(
                 hasBody: function (obj) {
                     return Boolean(
                         (typeof obj === "function" && obj.__meta) ||
-                        (obj &&
-                            typeof obj === "object" &&
-                            obj.constructor?.__meta &&
-                            obj !== obj.constructor.prototype),
+                            (obj &&
+                                typeof obj === "object" &&
+                                obj.constructor?.__meta &&
+                                obj !== obj.constructor.prototype),
                     );
                 },
                 body: function (obj) {
-                    const data =
-                        typeof obj === "function" && obj.__meta
-                            ? obj.inspect?.() || obj.__meta
-                            : snapshotInstance(obj);
-                    return ["div", {}, ["object", { object: data }]];
+                    // 1. Class / Unit Frame Tree
+                    if (typeof obj === "function" && obj.__meta) {
+                        const rep = obj.inspect ? obj.inspect() : obj.__meta;
+                        return [
+                            "div",
+                            {},
+                            row("🧬 Superclass (kindOf)", rep.superclass),
+                            row("🌿 Subclasses", rep.subclassRefs || rep.subclasses),
+                            row("📂 Public Instance Slots", rep.properties),
+                            row("🏛️ Class (Static) Slots", rep.classProperties),
+                            row("🔒 Private Slots", rep.privateProperties),
+                            row("🎰 Slot Metaobjects & Facets", rep.slots),
+                            row("⚙️ Instance Methods", rep.methodsDictionary),
+                            row("🏛️ Class Methods", rep.classMethodsDictionary),
+                            row("🔒 Private Methods", rep.privateMethodsDictionary),
+                            row("🌀 AOP Advices", rep.advices),
+                            row("📋 Forward Requirements", rep.requires),
+                            row("🧬 Raw __meta", obj.__meta),
+                        ];
+                    }
+
+                    // 2. Slot Metaobject Tree
+                    if (
+                        globalThis.Slot &&
+                        obj instanceof globalThis.Slot &&
+                        obj !== globalThis.Slot.prototype
+                    ) {
+                        return [
+                            "div",
+                            {},
+                            row("name", obj.name),
+                            row("init", obj.init),
+                            row("type", obj.type),
+                            row("allocation", obj.allocation),
+                            row("visibility", obj.visibility),
+                            row("ifNeeded", obj.ifNeeded),
+                            row("onChange", obj.onChange),
+                            row("transform", obj.transform),
+                            row("validate", obj.validate),
+                            row("symbol", obj.symbol),
+                        ];
+                    }
+
+                    // 3. GenericFunction Tree
+                    if (
+                        globalThis.GenericFunction &&
+                        obj instanceof globalThis.GenericFunction &&
+                        obj !== globalThis.GenericFunction.prototype
+                    ) {
+                        return [
+                            "div",
+                            {},
+                            row("name", obj.name),
+                            row("methods", obj.methods),
+                        ];
+                    }
+
+                    // 4. Method Metaobject Tree
+                    if (
+                        globalThis.Method &&
+                        obj instanceof globalThis.Method &&
+                        obj !== globalThis.Method.prototype
+                    ) {
+                        return [
+                            "div",
+                            {},
+                            row("qualifier", obj.qualifier),
+                            row("isStatic", Boolean(obj.isStatic)),
+                            row("specializers", obj.specializers),
+                            row("body", obj.body?.__originalFn || obj.body),
+                        ];
+                    }
+
+                    // 5. General Ouro Instance Frame Tree
+                    const rep =
+                        typeof Ouro.inspect === "function"
+                            ? Ouro.inspect(obj)
+                            : { publicProperties: snapshotInstance(obj) };
+                    return [
+                        "div",
+                        {},
+                        row("🧬 Class (Unit)", rep.class || obj.constructor),
+                        row("⛓️ Lineage", rep.lineageClasses || rep.lineage),
+                        row("📂 Public Slots", rep.publicProperties),
+                        row("🔒 Private Vault", rep.privateVault),
+                        row("🎰 Slot Definitions", rep.slots),
+                        row("⚙️ Methods & Accessors", rep.methodsDictionary),
+                    ];
                 },
             };
-            if (
-                !globalThis.window.devtoolsFormatters.some(
-                    (f) => f.__ouroFormatter,
-                )
-            ) {
+            const existingIdx = globalThis.window.devtoolsFormatters.findIndex(
+                (f) => f.__ouroFormatter,
+            );
+            if (existingIdx !== -1) {
+                globalThis.window.devtoolsFormatters[existingIdx] =
+                    ouroFormatter;
+            } else {
                 globalThis.window.devtoolsFormatters.push(ouroFormatter);
             }
         }
     },
     function () {
+        if (Ouro.devtoolsExtension._mountPrototypeHelpers) {
+            globalThis.Metaclass?.bootstrap?.allocateHooks?.delete(
+                Ouro.devtoolsExtension._mountPrototypeHelpers,
+            );
+        }
         if (globalThis.Metaclass?.prototype) {
             delete globalThis.Metaclass.prototype.inspect;
+            delete globalThis.Metaclass.prototype.toString;
+            globalThis.GenericFunction?._registry
+                ?.get("toString")
+                ?.removeMethod("primary", globalThis.Metaclass);
+        }
+        if (globalThis.GenericFunction?.prototype) {
+            delete globalThis.GenericFunction.prototype.toString;
+            globalThis.GenericFunction._registry
+                ?.get("toString")
+                ?.removeMethod("primary", globalThis.GenericFunction);
+        }
+        if (globalThis.Method?.prototype) {
+            delete globalThis.Method.prototype.toString;
+            globalThis.GenericFunction?._registry
+                ?.get("toString")
+                ?.removeMethod("primary", globalThis.Method);
         }
         delete Ouro.snapshot;
+        delete Ouro.inspect;
     },
 );
 

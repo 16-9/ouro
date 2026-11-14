@@ -1,10 +1,12 @@
 {
   "name": "ouro",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node tests/run-node.js",
+    "sync:prod": "node src/userscripts/sync-prod.js",
+    "sync:prod:force": "node src/userscripts/sync-prod.js --force"
   },
   "repository": {
     "type": "git",
