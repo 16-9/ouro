@@ -1375,6 +1375,7 @@ IMDB.register({
     traits: [HTMLContent, MovieDownloadable],
 });
 IMDB.register({ name: "imdbAPIPage", traits: [] }); // is there such a thing?
+
 imdbHTMLPage.register({
     name: "imdbMoviePage",
     description: "IMDB Movie Page",
@@ -1535,10 +1536,7 @@ Page.register({
                 () => Plex.machineIdentifier,
                 () => plexServerInfoPage,
             ],
-            librarySection: [
-                () => Plex.librarySection,
-                () => plexLibraryPage,
-            ],
+            librarySection: [() => Plex.librarySection, () => plexLibraryPage],
         },
         icon: "https://upload.wikimedia.org/wikipedia/commons/8/8e/Plex_favicon.png",
     },
