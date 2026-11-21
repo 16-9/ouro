@@ -28,6 +28,11 @@
 			"name": "Ouro: Syntax Check Current File",
 			"cmd": ["/opt/homebrew/bin/node", "--check", "$file"],
 			"working_dir": "${project_path}"
+		},
+		{
+			"name": "Ouro: Promote Dev to Main & Push",
+			"cmd": ["/opt/homebrew/bin/node", "build/promote.js"],
+			"working_dir": "${project_path}"
 		}
 	]
 }

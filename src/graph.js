@@ -194,6 +194,12 @@ Ouro.graphSystemExtension = new Extension(
                             return count;
                         },
 
+                        // Add missing record query
+                        record(query) {
+                            const instance = this.get(query);
+                            return instance ? instance.record : null;
+                        },
+
                         records(query) {
                             const instance = this.get(query);
                             return instance ? instance.records : [];

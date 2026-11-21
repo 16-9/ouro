@@ -1,0 +1,51 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Ouro: Run Unit Tests (Node CLI)",
+            "type": "process",
+            "command": "/opt/homebrew/bin/node",
+            "args": ["tests/run-node.js"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Ouro: Run Browser Test Harness (Chrome)",
+            "type": "shell",
+            "command": "osascript -e 'tell application \"Google Chrome\"' -e 'activate' -e 'set matchingTabs to (tabs of windows whose URL contains \"ouro_test.html\")' -e 'set found to false' -e 'repeat with winTabs in matchingTabs' -e 'repeat with t in winTabs' -e 'reload t' -e 'set found to true' -e 'end repeat' -e 'end repeat' -e 'end tell' -e 'if not found then do shell script \"open -na \\\"Google Chrome\\\" --args --profile-directory=\\\"Profile 7\\\" \\\"file://${workspaceFolder}/tests/ouro_test.html\\\"\"'",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Ouro: Syntax Check Current File",
+            "type": "process",
+            "command": "/opt/homebrew/bin/node",
+            "args": ["--check", "${file}"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Ouro: Promote Dev to Main & Push",
+            "type": "process",
+            "command": "/opt/homebrew/bin/node",
+            "args": ["build/promote.js"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "problemMatcher": []
+        }
+    ]
+}

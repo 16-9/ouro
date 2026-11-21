@@ -10,8 +10,11 @@ const force = args.has("--force");
 const stage = args.has("--stage");
 const checkOnly = args.has("--check");
 
-const repoRoot = path.resolve(__dirname, "../..");
-const userscriptsDir = __dirname;
+const repoRoot = path.resolve(__dirname, "..");
+const userscriptsDir = path.join(repoRoot, "src/userscripts");
+
+// [Best Practice] Extract Ouro version directly from package.json
+const { version: ouroVersion } = require(path.join(repoRoot, "package.json"));
 
 function getCurrentBranch() {
     try {
@@ -25,15 +28,21 @@ function getCurrentBranch() {
 }
 
 function toProdContent(devContent) {
-    return devContent
-        .replace(
-            /^(\/\/\s*@name\s+.*?)(\s*-\s*DEV)(\s*)$/m,
-            "$1 - Prod$3",
-        )
-        .replace(
-            /^(\/\/\s*@require\s+)file:\/\/\/Users\/christophe\/bin\/ouro\/(src|tests)\/(.+)$/gm,
-            "$1https://raw.githubusercontent.com/16-9/ouro/main/$2/$3",
-        );
+    return (
+        devContent
+            // 1. Swap DEV for Prod in the userscript name
+            .replace(/^(\/\/\s*@name\s+.*?)(\s*-\s*DEV)(\s*)$/m, "$1 - Prod$3")
+            // 2. Append the Ouro version with NO spaces (Tampermonkey compliant)
+            .replace(
+                /^(\/\/\s*@version\s+[\d\.]+)(.*)$/m,
+                `$1-Ouro${ouroVersion}`,
+            )
+            // 3. Swap local @require paths for GitHub raw URLs
+            .replace(
+                /^(\/\/\s*@require\s+)file:\/\/\/Users\/christophe\/bin\/ouro\/(src|tests)\/(.+)$/gm,
+                "$1https://raw.githubusercontent.com/16-9/ouro/main/$2/$3",
+            )
+    );
 }
 
 const branch = getCurrentBranch();
@@ -73,7 +82,9 @@ for (const devFile of devFiles) {
     if (currentProd !== expectedProd) {
         fs.writeFileSync(prodPath, expectedProd, "utf8");
         updatedCount++;
-        console.log(`[sync-prod] Updated: ${path.relative(repoRoot, prodPath)}`);
+        console.log(
+            `[sync-prod] Updated: ${path.relative(repoRoot, prodPath)}`,
+        );
     } else {
         console.log(
             `[sync-prod] Up to date: ${path.relative(repoRoot, prodPath)}`,

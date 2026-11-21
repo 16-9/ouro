@@ -1103,12 +1103,11 @@ Ouro.pageSystemExtension = new Extension(
                     const templateStr = Array.isArray(rt)
                         ? rt[0]
                         : rt || "no route";
-                    const aliases =
-                        Array.isArray(rt) && rt[2]
-                            ? Array.isArray(rt[2])
-                                ? rt[2]
-                                : [rt[2]]
-                            : [];
+                    const aliases = Array.isArray(rt)
+                        ? rt.slice(1).flatMap((item) =>
+                              Array.isArray(item) ? item : [item],
+                          )
+                        : [];
 
                     const combinedPatterns = [];
                     if (

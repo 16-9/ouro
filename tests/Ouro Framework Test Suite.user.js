@@ -16,6 +16,7 @@
 // @require      file:///Users/christophe/bin/ouro/src/ouro.js
 // @require      file:///Users/christophe/bin/ouro/src/scraper.js
 // @require      file:///Users/christophe/bin/ouro/src/graph.js
+// @require      file:///Users/christophe/bin/ouro/src/storage.js
 // @require      file:///Users/christophe/bin/ouro/tests/test.js
 // ==/UserScript==
 
@@ -23,12 +24,14 @@
 // @require      file:///Users/christophe/bin/ouro/src/ouro.js
 // @require      file:///Users/christophe/bin/ouro/src/scraper.js
 // @require      file:///Users/christophe/bin/ouro/src/graph.js
+// @require      file:///Users/christophe/bin/ouro/src/storage.js
 // @require      file:///Users/christophe/bin/ouro/tests/test.js
 
 // --- GITHUB CLOUD REQUIRES (Uncomment when testing from main branch) ---
 // @require      https://raw.githubusercontent.com/16-9/ouro/main/src/ouro.js
 // @require      https://raw.githubusercontent.com/16-9/ouro/main/src/scraper.js
 // @require      https://raw.githubusercontent.com/16-9/ouro/main/src/graph.js
+// @require      https://raw.githubusercontent.com/16-9/ouro/main/src/storage.js
 // @require      https://raw.githubusercontent.com/16-9/ouro/main/tests/test.js
 
 /* global Ouro HTMLPage Page registerOuroTests Test runtests */

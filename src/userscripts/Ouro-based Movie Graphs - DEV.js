@@ -28,15 +28,16 @@
 // @match        file:///Volumes/Media/Movies/*.json
 // @match        http://server:8080/media/*json
 
-// @match        *://yts.gg/browse-movies*
-// @match        *://yts.gg/movies/*
-// @match        *://yts.gg/trending-movies
-// @match        *://yts.gg/home
-// @match        *://yts.gg/
+// @match        *://yts.pw/browse-movies*
+// @match        *://yts.pw/movies/*
+// @match        *://yts.pw/trending-movies
+// @match        *://yts.pw/home
+// @match        *://yts.pw/
 
 // @require      file:///Users/christophe/bin/ouro/src/ouro.js
 // @require      file:///Users/christophe/bin/ouro/src/scraper.js
 // @require      file:///Users/christophe/bin/ouro/src/graph.js
+// @require      file:///Users/christophe/bin/ouro/src/storage.js
 // ==/UserScript==
 
 //                                   .:-----.
@@ -539,6 +540,7 @@ tmdbAPIPage.register({
 Page.register({
     name: "YTS",
     class: {
+        domain: "yts.pw",
         rejectedLanguages: "HI|TE|TA|BN|ML|UR|MR|KN|PA|GU",
         icon: "https://yts.lt/assets/images/website/logo-YTS.svg",
         selectPreferredTorrent(data) {
@@ -851,12 +853,12 @@ ytsHTMLPage.register({
     name: "ytsBrowsePage",
     class: {
         routeTemplate: [
-            "https://yts.gg/home",
-            "yts.gg/browse-movies*",
-            "yts.gg/movies/*",
-            "yts.gg/trending-movies",
-            "yts.gg/home",
-            "yts.gg/",
+            `https://${YTS.domain}/home`,
+            `${YTS.domain}/browse-movies*`,
+            `${YTS.domain}/movies/*`,
+            `${YTS.domain}/trending-movies`,
+            `${YTS.domain}/home`,
+            `${YTS.domain}/`,
         ],
     },
     schema: {
@@ -1074,7 +1076,7 @@ ytsHTMLPage.register({
 ytsHTMLPage.register({
     name: "ytsMoviePage",
     description: "YTS Movie Page",
-    class: { routeTemplate: "https://yts.gg/movies/${movieStub}" },
+    class: { routeTemplate: `https://${YTS.domain}/movies/\${movieStub}` },
     schema: {
         id: ["div#movie-info", "data-movie-id"],
         titles: [["h1"]],
@@ -1639,7 +1641,7 @@ plexHTMLPage.register({
             img.style = "height: 24px; width: auto; margin-left: 12px;";
             img.src = YTS.icon;
             img.onclick = () => {
-                window.location.href = `https://yts.gg/movies/${oldGraph.yts_slug}`;
+                window.location.href = `https://${YTS.domain}/movies/${oldGraph.yts_slug}`;
             };
             this.data.graph = oldGraph;
         } else {

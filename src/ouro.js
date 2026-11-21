@@ -2,7 +2,7 @@
 // OURO: Object Unified Reflective Ontology
 // a JavaScript AOP Metaobject Protocol
 //
-// "La clarté est le contrepoids des pensées profondes."
+// "La clarté orne les pensées profondes."
 // — Luc de Clapiers, marquis de Vauvenargues
 //
 // The Forging of the Ouroboros:
@@ -13,7 +13,7 @@
 // START OURO CORE
 
 globalThis.Ouro = (function () {
-    const VERSION = "2.1.0";
+    const VERSION = "2.2.0";
 
     // --- INTERNAL NAMESPACE & STATE ---
     let isLoaded = false;
@@ -68,12 +68,12 @@ globalThis.Ouro = (function () {
             #@   +@#-@.    Object Unified Reflective Ontology    ##-@=
             %+  +@* *%     a JavaScript AOP Metaobject Protocol  =@.=@
             %- =@*  @%                                           :@: @#
-            %- @@.  #%        The Forging of the Ouroboros         +@  @%
+            %- @@.  #%        The Forging of the Ouroboros       +@  @%
             ##=@+   -@.    Out of the void, the forge is lit.   @+ -@%
             #@*@=   -@%      The serpent bites its own tail,    #% .@@#
              @@@=   =@@-         and from the circle,          %% .@@@+
-             *@@=   -@@@.        true creation begins.       =@= +@%%%
-              %@%   :@%-@*                                 @@.=@@-=@:
+             *@@=   -@@@.        true creation begins.        =@= +@%%%
+              %@%   :@%-@*                                   @@.=@@-=@:
                %@=   @@..@@.            vx.y.z              %@:+@@= -@=
                 #@.  :@%  -%@:                         =@@*@@#.  +@-
                  =@-  *@+   .%@@=                 =@@@@@+.    %%.
@@ -255,10 +255,10 @@ globalThis.Ouro = (function () {
                 if (
                     isName
                         ? curr.__meta.name === target ||
-                          curr.__meta.nativeParent?.name === target
+                        curr.__meta.nativeParent?.name === target
                         : curr === target ||
-                          curr.__meta.nativeParent === target ||
-                          curr.__meta.name === target.name
+                        curr.__meta.nativeParent === target ||
+                        curr.__meta.name === target.name
                 ) {
                     return true;
                 }
@@ -335,7 +335,7 @@ globalThis.Ouro = (function () {
                         return this.__meta
                             ? this.__meta.name
                             : this.constructor?.__meta?.name ||
-                                  this.constructor?.name;
+                            this.constructor?.name;
                     },
                     configurable: true,
                     enumerable: false,
@@ -594,7 +594,7 @@ globalThis.Ouro = (function () {
                                 classConstructor.__meta.slotFacets ??= {};
                                 const existingSlot =
                                     classConstructor.__meta.slotSymbols[
-                                        propName
+                                    propName
                                     ];
                                 if (
                                     !overwrite &&
@@ -617,8 +617,8 @@ globalThis.Ouro = (function () {
                                     ? fv.init in rawVal
                                         ? rawVal[fv.init]
                                         : fv.value in rawVal
-                                          ? rawVal[fv.value]
-                                          : rawVal[fv.default]
+                                            ? rawVal[fv.value]
+                                            : rawVal[fv.default]
                                     : rawVal;
 
                                 let inheritedFacets = {};
@@ -658,7 +658,7 @@ globalThis.Ouro = (function () {
                                     inheritedFacets,
                                     existingSlot?.facets || {},
                                     classConstructor.__meta.slotFacets[
-                                        propName
+                                    propName
                                     ] || {},
                                     inlineFacets,
                                 );
@@ -700,7 +700,7 @@ globalThis.Ouro = (function () {
                                         if (
                                             recv[backingSymbol] === undefined &&
                                             typeof facets.ifNeeded ===
-                                                "function" &&
+                                            "function" &&
                                             (isStatic || recv !== target)
                                         ) {
                                             const computed =
@@ -771,7 +771,7 @@ globalThis.Ouro = (function () {
                                 if (
                                     hasAccessor &&
                                     typeof GenericFunction?.defgeneric ===
-                                        "function"
+                                    "function"
                                 ) {
                                     if (descriptor.get) {
                                         const primaryGet = (recv) =>
@@ -802,17 +802,17 @@ globalThis.Ouro = (function () {
                                     Object.defineProperty(target, propName, {
                                         get: descriptor.get
                                             ? function () {
-                                                  return GenericFunction.defgeneric(
-                                                      `get:${propName}`,
-                                                  ).dispatch(this);
-                                              }
+                                                return GenericFunction.defgeneric(
+                                                    `get:${propName}`,
+                                                ).dispatch(this);
+                                            }
                                             : undefined,
                                         set: descriptor.set
                                             ? function (newVal) {
-                                                  return GenericFunction.defgeneric(
-                                                      `set:${propName}`,
-                                                  ).dispatch(this, newVal);
-                                              }
+                                                return GenericFunction.defgeneric(
+                                                    `set:${propName}`,
+                                                ).dispatch(this, newVal);
+                                            }
                                             : undefined,
                                         enumerable: true,
                                         configurable: true,
@@ -867,8 +867,8 @@ globalThis.Ouro = (function () {
                             (options.static || options.class
                                 ? "class"
                                 : options.shared
-                                  ? "shared"
-                                  : "instance");
+                                    ? "shared"
+                                    : "instance");
                         const overwrite =
                             options.overwrite !== undefined
                                 ? Boolean(options.overwrite)
@@ -927,7 +927,7 @@ globalThis.Ouro = (function () {
                         return (
                             this.__meta?.slotFacets?.[propName]?.[facetName] ??
                             this.__meta?.slotSymbols?.[propName]?.facets?.[
-                                facetName
+                            facetName
                             ]
                         );
                     },
@@ -943,14 +943,14 @@ globalThis.Ouro = (function () {
                             qualifier !== "primary"
                                 ? qualifier
                                 : options.visibility ||
-                                  (options.private ? "private" : "public");
+                                (options.private ? "private" : "public");
                         const allocation =
                             options.allocation ||
                             (options.static || options.class
                                 ? "class"
                                 : options.shared
-                                  ? "shared"
-                                  : "instance");
+                                    ? "shared"
+                                    : "instance");
                         return this.addMethods({
                             [visibility]: {
                                 [allocation]: {
@@ -1045,7 +1045,7 @@ globalThis.Ouro = (function () {
                                             (m) =>
                                                 m.qualifier === "primary" &&
                                                 m.specializers[0] ===
-                                                    classConstructor &&
+                                                classConstructor &&
                                                 m.isStatic === isStatic,
                                         );
                                 if (isUpgraded) continue;
@@ -1054,7 +1054,7 @@ globalThis.Ouro = (function () {
                                 classConstructor.__meta.slotFacets ??= {};
                                 const slotObj =
                                     classConstructor.__meta.slotSymbols[
-                                        propName
+                                    propName
                                     ];
                                 if (
                                     slotObj &&
@@ -1115,7 +1115,7 @@ globalThis.Ouro = (function () {
                                             recv[backingSymbol] === undefined &&
                                             facets &&
                                             typeof facets.ifNeeded ===
-                                                "function" &&
+                                            "function" &&
                                             (isStatic || recv !== target)
                                         ) {
                                             const computed =
@@ -1135,7 +1135,7 @@ globalThis.Ouro = (function () {
                                     }
                                     const facets =
                                         classConstructor.__meta?.slotFacets?.[
-                                            propName
+                                        propName
                                         ];
                                     let nextVal = val;
                                     if (facets && facets.type !== undefined) {
@@ -1289,9 +1289,9 @@ globalThis.Ouro = (function () {
 
                                     return injectSelf
                                         ? actualFn.apply(recv, [
-                                              recv,
-                                              ...methodArgs,
-                                          ])
+                                            recv,
+                                            ...methodArgs,
+                                        ])
                                         : actualFn.apply(recv, methodArgs);
                                 };
                                 closMethod.__originalArity =
@@ -1984,7 +1984,7 @@ globalThis.Ouro = (function () {
                                         if (
                                             afterResult &&
                                             typeof afterResult.then ===
-                                                "function"
+                                            "function"
                                         ) {
                                             return afterResult.then((final) => {
                                                 teardown();
@@ -2268,10 +2268,10 @@ globalThis.Ouro = (function () {
 
     console.info(
         "\n" +
-            banner.replace(/vx\.y\.z\s*/, (m) =>
-                `v${VERSION}`.padEnd(m.length, " "),
-            ) +
-            "\n",
+        banner.replace(/vx\.y\.z\s*/, (m) =>
+            `v${VERSION}`.padEnd(m.length, " "),
+        ) +
+        "\n",
     );
 
     return Ouro_API;
@@ -2363,8 +2363,8 @@ Ouro.syntaxDXExtension = new Ouro.Extension(
                             : val &&
                                 typeof val === "object" &&
                                 Object.getPrototypeOf(val) === Object.prototype
-                              ? { ...val }
-                              : val;
+                                ? { ...val }
+                                : val;
                     } else if (Array.isArray(val)) {
                         props[key] = [];
                     } else if (
@@ -2540,7 +2540,7 @@ Ouro.syntaxDXExtension = new Ouro.Extension(
                     } catch (e) {
                         try {
                             NativeClass.apply(this, args);
-                        } catch (_) {}
+                        } catch (_) { }
                     }
                 };
             }
@@ -2848,11 +2848,11 @@ Ouro.schemaNormalizerExtension = new Ouro.Extension(
                             const targetContainer =
                                 context.qualifier !== "primary"
                                     ? strict[v.methods][context.qualifier][
-                                          alloc
-                                      ]
+                                    alloc
+                                    ]
                                     : strict[v.methods][context.visibility][
-                                          alloc
-                                      ];
+                                    alloc
+                                    ];
                             targetContainer[rawKey] = val;
                         } else {
                             const targetProps =
@@ -3106,11 +3106,7 @@ Ouro.introspectionExtension = new Ouro.Extension(
         const trackAllocation = (rawClass, parentClass, meta) => {
             meta.subclasses ??= [];
             meta.instances ??= new WeakSet();
-            if (
-                parentClass &&
-                parentClass !== Object &&
-                parentClass.__meta
-            ) {
+            if (parentClass && parentClass !== Object && parentClass.__meta) {
                 parentClass.__meta.subclasses ??= [];
                 if (!parentClass.__meta.subclasses.includes(meta.name)) {
                     parentClass.__meta.subclasses.push(meta.name);
@@ -3602,7 +3598,7 @@ Ouro.introspectionExtension = new Ouro.Extension(
                     if (slotObj?.isStatic) continue;
                     try {
                         out[propName] = inst[propName];
-                    } catch (_) {}
+                    } catch (_) { }
                 }
                 for (const k of Object.keys(inst || {})) {
                     if (k === "inner" || k === "__mop_dispatch_stack") continue;
@@ -4070,8 +4066,8 @@ Ouro.traitSystemExtension = new Ouro.Extension(
                                             Object.getPrototypeOf(
                                                 desc.value,
                                             ) === Object.prototype
-                                          ? { ...desc.value }
-                                          : desc.value;
+                                            ? { ...desc.value }
+                                            : desc.value;
                                 } else {
                                     Object.defineProperty(
                                         targetInstance,
@@ -4100,9 +4096,9 @@ Ouro.traitSystemExtension = new Ouro.Extension(
                                         : v &&
                                             typeof v === "object" &&
                                             Object.getPrototypeOf(v) ===
-                                                Object.prototype
-                                          ? { ...v }
-                                          : v;
+                                            Object.prototype
+                                            ? { ...v }
+                                            : v;
                                 }
                             });
                         }
@@ -4247,7 +4243,7 @@ Ouro.traitSystemExtension = new Ouro.Extension(
                                         typeof desc.value === "object" &&
                                         !Array.isArray(desc.value) &&
                                         Object.getPrototypeOf(desc.value) ===
-                                            Object.prototype
+                                        Object.prototype
                                     ) {
                                         target[key] = target[key] || {};
                                         mergeMatrix(target[key], desc.value);
@@ -4705,7 +4701,7 @@ Ouro.devtoolsExtension = new Ouro.Extension(
                     if (!(propName in out)) {
                         try {
                             out[propName] = inst[propName];
-                        } catch (_) {}
+                        } catch (_) { }
                     }
                 }
                 curr = curr.__meta.parent;
@@ -5022,12 +5018,18 @@ Ouro.devtoolsExtension = new Ouro.Extension(
                             `%c[Ouro Reflection Inspector] Instance of ${meta.name}`,
                             "color: #4285F4; font-weight: bold; font-size: 13px;",
                         );
-                        console.log("🧬 Lineage:", lineage.join(" -> "), lineageClasses);
+                        console.log(
+                            "🧬 Lineage:",
+                            lineage.join(" -> "),
+                            lineageClasses,
+                        );
                         console.group("📂 Public State / Slots:");
                         console.table(publicProperties);
                         console.groupEnd();
                         if (Object.keys(privateVault).length > 0) {
-                            console.group("🔒 Private State (Vault & Internal Slots):");
+                            console.group(
+                                "🔒 Private State (Vault & Internal Slots):",
+                            );
                             console.table(privateVault);
                             console.groupEnd();
                         }
@@ -5079,8 +5081,8 @@ Ouro.devtoolsExtension = new Ouro.Extension(
                                         s && s.getName
                                             ? s.getName()
                                             : s?.__meta?.name ||
-                                              s?.name ||
-                                              "Any",
+                                            s?.name ||
+                                            "Any",
                                     )
                                     .join(", ");
                                 return `[Method: :${this.qualifier} (${specs})]`;
@@ -5114,7 +5116,7 @@ Ouro.devtoolsExtension = new Ouro.Extension(
                 { style: style.section },
                 ["span", { style: labelStyle }, `${label}: `],
                 valueObj !== null &&
-                (typeof valueObj === "object" || typeof valueObj === "function")
+                    (typeof valueObj === "object" || typeof valueObj === "function")
                     ? ["object", { object: valueObj }]
                     : ["span", { style: style.muted }, String(valueObj)],
             ];
@@ -5207,10 +5209,7 @@ Ouro.devtoolsExtension = new Ouro.Extension(
                         obj !== globalThis.Method.prototype
                     ) {
                         const specs = (obj.specializers || [])
-                            .map(
-                                (s) =>
-                                    s?.__meta?.name || s?.name || "Any",
-                            )
+                            .map((s) => s?.__meta?.name || s?.name || "Any")
                             .join(", ");
                         return [
                             "span",
@@ -5278,10 +5277,10 @@ Ouro.devtoolsExtension = new Ouro.Extension(
                 hasBody: function (obj) {
                     return Boolean(
                         (typeof obj === "function" && obj.__meta) ||
-                            (obj &&
-                                typeof obj === "object" &&
-                                obj.constructor?.__meta &&
-                                obj !== obj.constructor.prototype),
+                        (obj &&
+                            typeof obj === "object" &&
+                            obj.constructor?.__meta &&
+                            obj !== obj.constructor.prototype),
                     );
                 },
                 body: function (obj) {
@@ -5292,14 +5291,20 @@ Ouro.devtoolsExtension = new Ouro.Extension(
                             "div",
                             {},
                             row("🧬 Superclass (kindOf)", rep.superclass),
-                            row("🌿 Subclasses", rep.subclassRefs || rep.subclasses),
+                            row(
+                                "🌿 Subclasses",
+                                rep.subclassRefs || rep.subclasses,
+                            ),
                             row("📂 Public Instance Slots", rep.properties),
                             row("🏛️ Class (Static) Slots", rep.classProperties),
                             row("🔒 Private Slots", rep.privateProperties),
                             row("🎰 Slot Metaobjects & Facets", rep.slots),
                             row("⚙️ Instance Methods", rep.methodsDictionary),
                             row("🏛️ Class Methods", rep.classMethodsDictionary),
-                            row("🔒 Private Methods", rep.privateMethodsDictionary),
+                            row(
+                                "🔒 Private Methods",
+                                rep.privateMethodsDictionary,
+                            ),
                             row("🌀 AOP Advices", rep.advices),
                             row("📋 Forward Requirements", rep.requires),
                             row("🧬 Raw __meta", obj.__meta),

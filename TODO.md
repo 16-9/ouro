@@ -23,7 +23,7 @@
 - [x] **Investigate Faceted Slots:** Implement KEE/CLOS-inspired reactive metadata triggers and declarative slot facets *(Implemented `Ouro.Vocabulary.facets`, declarative inline `{ init, value, default, ifNeeded, transform, validate, onChange, type }` property descriptors, `facetted({...})` / `faceted({...})` helper, `Class.setSlotFacet` / `Class.getSlotFacet` / `Class.getSlot`, subclass facet inheritance, reactive `RouteURL.args` Proxy, and `Graph.keyTypes`, integrated into both unadvised and advised slot metaobjects)*.
 - [x] **Explore Multi-Dispatch (Generic Functions):** Expand dispatcher *(Added `Method.prototype.getSpecificity(args)` and lexicographic specificity sorting in `GenericFunction.prototype.dispatch` across multi-argument specializers)*.
 - [x] **Forward-Declared / Scaffolded Manifests:** Design opt-in registry *(Implemented via `Ouro.Forward` and `requires:` manifest tracking in `__meta.requires`)*.
-- [x] **Modular Extension Packaging:** Separate core from optional plugins *(Separated `Ouro.load()` kernel from modular extensions in `src/ouro.js`, `src/scraper.js`, and `src/graph.js`, and added `main`-branch-gated DEV -> Prod userscript sync in `src/userscripts/sync-prod.js`)*.
+- [x] **Modular Extension Packaging:** Separate core from optional plugins *(Separated `Ouro.load()` kernel from modular extensions in `src/ouro.js`, `src/scraper.js`, and `src/graph.js`, and added `main`-branch-gated DEV -> Prod userscript sync in `build/sync-prod.js` and branch promotion in `build/promote.js`)*.
 
 ---
 
@@ -45,3 +45,19 @@
 - [x] **21. Extract `GenericFunction` Reflection from Core:** Move `getMethods()` out of Core `GenericFunction` into `Ouro.introspectionExtension` and add `getName()` there *(Completed in `src/ouro.js`; core dispatcher and `removeMethod` access `this.methods` and `this.name` directly)*.
 - [x] **22. Consolidate `toString` Sugar in DevTools Extension:** Move `Metaclass.prototype.toString`, `Method.prototype.toString`, and `GenericFunction.prototype.toString` from `Ouro.introspectionExtension` into `Ouro.devtoolsExtension` *(Completed in `src/ouro.js`)*.
 - [x] **23. Slim `Bootstrap.allocate` Tracking & Inspection Hooks:** Move active instance tracking (`__meta.instances` `WeakSet` population), `__meta.subclasses` tracking, and prototype `toSnapshot` / `inspect` mounting out of `Bootstrap.allocate` and into `Ouro.introspectionExtension` and `Ouro.devtoolsExtension` via `Metaclass.bootstrap.allocateHooks` / `instantiateHooks` *(Completed in `src/ouro.js`)*.
+
+---
+
+## Scraper, Graph, Storage & DevTools v2.1 / v2.2 Expansions
+
+- [x] **24. Scraper & Graph Framework Modernization (`src/scraper.js`, `src/graph.js`):**
+  - Declarative `schema:` (and `structure:`) and `namespace:` on `Page`, plus schemaless `JSONPage.prototype.scrape()` fallback.
+  - Declarative `providers` (inherited across `Page` lineage via `_collectLineageMap`) and `enrichers` (with multi-candidate fallback chains).
+  - Declarative `DOMValue.create(tag, options)` factory and fluent DOM manipulation helpers (`.css()`, `.attr()`, `.on()`, `.append()`, `.appendTo()`, `.wrap()`, `.linkify()`, `.badge()`).
+  - Network concurrency limiter (`Page.maxConcurrent = 8`) and automatic retry on transient failures or HTTP `429/502/503/504` in `Page._networkFetch`.
+  - Reactive `RouteURL.args` `Proxy` and `RouteURL.builder` `onChange` facet, plus `Page.toast` and `Page.prototype.request` `ifNeeded` facets.
+  - `Graph` enhancements: `secondaryKeys`, `keyTypes` coercion, multi-key `Graph.get()`, `Graph.record(query)`, `Graph.prune()`, and cross-graph `relations` (`Graph.resolve()`).
+- [x] **25. KEE / Symbolics Live DevTools Inspector & Core Footprint Audit (`src/ouro.js`):** Upgrade `Ouro.devtoolsExtension` (`window.devtoolsFormatters`) to render navigable KEE-style frames for `Class` (`Unit`), `Instance`, `Slot`, `GenericFunction`, `Method`, and `Trait`, and integrate `fragments.js`'s `inspectOuroInstance` (`methodsDictionary`, `slots`, `subclassRefs`, `lineageClasses`) and `auditJMOPCoreToJSON` (`coreFootprint`) into `inspect()` and `Ouro.audit()`.
+- [x] **26. Tabular Storage Extension & Four Books Cookbook (`src/storage.js`, `README.md`):** Add `Ouro.storageExtension` (`StorageTable`, `StorageDB`, `BTKStorage` facade) and rewrite `README.md` around the Four Books architecture (`v2.2.0`).
+- [x] **27. Flat `routeTemplate` Match Pattern Logging in `Page.register()` (`src/scraper.js`):** Update `Page.register()`'s `// @match` console logger to collect all flat string patterns in `rt.slice(1)` (supporting both flat pattern arrays and nested arrays) rather than only checking `rt[2]`.
+- [x] **28. Unit Test Coverage for `StorageDB`, `Graph.record`, KEE Inspector & Flat `routeTemplate` (`tests/test.js`, `tests/run-node.js`):** Load `src/storage.js` in the test runners and add unit tests verifying `StorageTable` / `StorageDB` / `BTKStorage`, `Graph.record()`, KEE `inspect()` / `Ouro.audit().coreFootprint`, and flat `routeTemplate` `@match` logging.

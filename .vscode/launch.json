@@ -1,0 +1,47 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Ouro: Run Unit Tests (Node CLI)",
+            "type": "node",
+            "request": "launch",
+            "runtimeExecutable": "/opt/homebrew/bin/node",
+            "program": "${workspaceFolder}/tests/run-node.js",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "internalConsoleOptions": "neverOpen"
+        },
+        {
+            "name": "Ouro: Run Browser Test Harness (Chrome)",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "osascript -e 'tell application \"Google Chrome\"' -e 'activate' -e 'set matchingTabs to (tabs of windows whose URL contains \"ouro_test.html\")' -e 'set found to false' -e 'repeat with winTabs in matchingTabs' -e 'repeat with t in winTabs' -e 'reload t' -e 'set found to true' -e 'end repeat' -e 'end repeat' -e 'end tell' -e 'if not found then do shell script \"open -na \\\"Google Chrome\\\" --args --profile-directory=\\\"Profile 7\\\" \\\"file://${workspaceFolder}/tests/ouro_test.html\\\"\"'",
+            "cwd": "${workspaceFolder}",
+            "console": "neverOpen"
+        },
+        {
+            "name": "Ouro: Syntax Check Current File",
+            "type": "node",
+            "request": "launch",
+            "runtimeExecutable": "/opt/homebrew/bin/node",
+            "runtimeArgs": ["--check"],
+            "program": "${file}",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "internalConsoleOptions": "neverOpen"
+        },
+        {
+            "name": "Ouro: Promote Dev to Main & Push",
+            "type": "node",
+            "request": "launch",
+            "runtimeExecutable": "/opt/homebrew/bin/node",
+            "program": "${workspaceFolder}/build/promote.js",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "internalConsoleOptions": "neverOpen"
+        }
+    ]
+}

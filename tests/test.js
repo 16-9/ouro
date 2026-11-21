@@ -86,6 +86,21 @@ globalThis.registerOuroTests = function () {
                         };
 
                         this.reset();
+
+                        // --- BEGIN NEW PLAYGROUND LINKS ---
+                        if (typeof document !== "undefined") {
+                            const playground =
+                                document.getElementById("Playground");
+                            if (playground) {
+                                playground.innerHTML = `
+                                    <a href="https://yts.pw/browse-movies/0/1080p/all/0/latest/0/all" target="_blank" style="margin-right: 15px;">YTS Browse</a>
+                                    <a href="https://yts.pw/movies/heart-of-the-beast-2026" target="_blank" style="margin-right: 15px;">YTS Movie</a>
+                                    <a href="https://app.plex.tv/desktop/#!/server/e89a3831eea46ab472d5745f0d60fae6dc5685ac/details?key=/library/metadata/185310" target="_blank">Plex Movie</a>
+                                `;
+                            }
+                        }
+                        // --- END NEW PLAYGROUND LINKS ---
+
                         try {
                             this.tests.forEach((t) => t.run());
                             this.rate = `${this.passed}/${this.executed}`;
@@ -999,6 +1014,7 @@ globalThis.registerOuroTests = function () {
 
     const RouteURL = Class({
         name: "RouteURL",
+        publish: false,
         description:
             "A reactive, single-source-of-truth URL template and router.",
 
@@ -2141,7 +2157,7 @@ globalThis.registerOuroTests = function () {
                 private: true,
             });
             DynTarget.addMethod("reveal", function () {
-                return `${this. secretTag}:${this.score}`;
+                return `${this.secretTag}:${this.score}`;
             });
 
             const inst = new DynTarget();
@@ -2267,9 +2283,7 @@ globalThis.registerOuroTests = function () {
             ConcreteStore.addMethod("disconnect", () => true);
             const finallyComplete = ConcreteStore.isComplete();
 
-            return (
-                initiallyIncomplete && partiallyComplete && finallyComplete
-            );
+            return initiallyIncomplete && partiallyComplete && finallyComplete;
         },
     });
 
@@ -2604,6 +2618,150 @@ globalThis.registerOuroTests = function () {
                 RestoredClass.toString().includes("ƒ <RestoredClass> Class()");
 
             return loadedChecks && unloadedChecks && restoredChecks;
+        },
+    });
+
+    new Test({
+        name: "TODO #24, #25, #27, #28: Flat routeTemplate Match Logging, KEE Inspector, Graph.record & StorageDB",
+        description:
+            "Verifies flat routeTemplate @match logging in Page.register, KEE-style inspect/audit coreFootprint, Graph.record(query), and StorageTable/StorageDB/BTKStorage operations.",
+        code: () => {
+            // 1. #27: Flat routeTemplate @match pattern logging in Page.register
+            const loggedInfos = [];
+            const origInfo = console.info;
+            console.info = (...args) => {
+                loggedInfos.push(args.join(" "));
+                origInfo.apply(console, args);
+            };
+            let MultiPatternPage;
+            try {
+                MultiPatternPage = Page.register({
+                    name: "multiPatternTestPage",
+                    publish: false,
+                    class: {
+                        routeTemplate: [
+                            "https://cinema.local/movies/${slug}",
+                            "cinema.local/films/*",
+                            "cinema.local/trending",
+                        ],
+                    },
+                });
+            } finally {
+                console.info = origInfo;
+            }
+            const flatPatternsLogged =
+                loggedInfos.some((l) =>
+                    l.includes("*://cinema.local/films/*"),
+                ) &&
+                loggedInfos.some((l) =>
+                    l.includes("*://cinema.local/trending"),
+                );
+
+            const matcher = new globalThis.RouteURL(
+                MultiPatternPage.routeTemplate,
+            );
+            const flatPatternsMatched =
+                matcher.match("cinema.local/films/arrival") !== null &&
+                matcher.match("https://cinema.local/trending") !== null;
+
+            // 2. #25: KEE Inspector & coreFootprint in Ouro.audit()
+            const audit = Ouro.audit();
+            const hasCoreFootprint =
+                Array.isArray(audit.coreFootprint?.Metaclass?.prototypeKeys) &&
+                Array.isArray(audit.coreFootprint?.Slot?.prototypeKeys);
+            const pageInspect = inspect(MultiPatternPage);
+            const hasKEERefs =
+                pageInspect.superclass === Page &&
+                typeof pageInspect.methodsDictionary === "object" &&
+                typeof pageInspect.slots === "object";
+
+            // 3. #24: Graph.record(query) single-entity hierarchical lookup
+            const RecTestGraph = Class({
+                name: "RecTestGraph",
+                publish: false,
+                kindOf: Graph,
+                class: {
+                    primaryKeys: ["item_id"],
+                },
+            });
+            RecTestGraph.deleteAll();
+            RecTestGraph.put({ item_id: "it-1", tag: "alpha" });
+            const singleRec = RecTestGraph.record({ item_id: "it-1" });
+            const graphRecordWorks =
+                singleRec?.item_id === "it-1" &&
+                singleRec?.variants?.[0]?.tag === "alpha";
+            RecTestGraph.deleteAll();
+
+            // 4. #28: StorageTable, StorageDB & BTKStorage facade
+            let storageWorks = true;
+            if (typeof BTKStorage !== "undefined") {
+                const db = BTKStorage.createDB(
+                    "OuroTestDB",
+                    { autocommit: true },
+                    "script",
+                );
+                if (!db.tables.movies) {
+                    BTKStorage.createTable("movies", "imdb|res", db);
+                } else {
+                    db.tables.movies.rows = {};
+                }
+                BTKStorage.insert(
+                    { imdb: "tt0133093", res: "1080p", title: "The Matrix" },
+                    "movies",
+                    db,
+                );
+                BTKStorage.update(
+                    {
+                        imdb: "tt0133093",
+                        res: "1080p",
+                        title: "The Matrix (Remastered)",
+                    },
+                    "movies",
+                    db,
+                );
+                BTKStorage.upsert(
+                    { imdb: "tt0133093", res: "4K", title: "The Matrix 4K" },
+                    "movies",
+                    db,
+                );
+                const selected = BTKStorage.select(
+                    { imdb: "tt0133093" },
+                    "movies",
+                    db,
+                );
+                const rowKeys = Object.keys(selected.rows);
+
+                // Reload from persistent GM storage driver to verify commit/load cycle
+                const reloadedDb = BTKStorage.createDB(
+                    "OuroTestDB",
+                    { autocommit: true },
+                    "script",
+                );
+                const reloadedRow =
+                    reloadedDb.getTable("movies").rows["tt0133093|1080p"];
+
+                BTKStorage.destroy(
+                    { imdb: "tt0133093", res: "1080p" },
+                    "movies",
+                    reloadedDb,
+                );
+                const afterDestroy =
+                    reloadedDb.getTable("movies").rows["tt0133093|1080p"];
+
+                storageWorks =
+                    rowKeys.length === 2 &&
+                    reloadedRow?.title === "The Matrix (Remastered)" &&
+                    afterDestroy === undefined;
+            }
+
+            return (
+                flatPatternsLogged &&
+                flatPatternsMatched &&
+                hasCoreFootprint &&
+                hasKEERefs &&
+                graphRecordWorks &&
+                storageWorks
+            );
         },
     });
 

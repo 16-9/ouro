@@ -1,12 +1,13 @@
 {
   "name": "ouro",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "",
   "main": "index.js",
   "scripts": {
     "test": "node tests/run-node.js",
-    "sync:prod": "node src/userscripts/sync-prod.js",
-    "sync:prod:force": "node src/userscripts/sync-prod.js --force"
+    "sync:prod": "node build/sync-prod.js",
+    "sync:prod:force": "node build/sync-prod.js --force",
+    "promote": "node build/promote.js"
   },
   "repository": {
     "type": "git",

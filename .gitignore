@@ -1,3 +1,15 @@
+# Ignore everything in .vscode by default
+.vscode/*
+
+# Whitelist portable project configs
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Still ignore local workspace files
+*.code-workspace
+
 # ./dev/ directory local only
 .dev/
 
@@ -6,6 +18,8 @@
 
 # macOS metadata
 .DS_Store
+
+### END OF MY ADDITIONS
 
 # Logs
 logs

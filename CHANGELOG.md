@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.2.0] - 2026-11-20
+
+### Added
+
+- **KEE / Symbolics-Inspired Live DevTools Inspector (`src/ouro.js`):**
+    - Upgraded `Ouro.devtoolsExtension` (`window.devtoolsFormatters`) to render color-coded, interactive, collapsible frames in Chrome DevTools for Ouro **Classes (`Unit` frames)**, **Instances**, **`Slot` metaobjects**, **`GenericFunction`s**, **`Method`s**, and **`Trait`s**, exposing live clickable object references (`superclass`, `subclassRefs`, `lineageClasses`, `slots`, `methodsDictionary`, `advices`, `privateVault`).
+    - Expanded `Class.inspect()` and `instance.inspect()` with live `methodsDictionary`, `slots`, `subclassRefs`, `lineageClasses`, and styled `{ log: true }` console group reports.
+    - Added `coreFootprint` (`Reflect.ownKeys` inventory of `Class`, `Metaclass`, `Method`, `GenericFunction`, and `Slot` constructors and prototypes) to `Ouro.audit()`.
+- **Graph & Storage Enhancements (`src/graph.js`, `src/storage.js`):**
+    - Added `Graph.record(query)` static shorthand on `Graph` to return a single entity's hierarchical `{ ...primaryKeys, variants: [...] }` record directly.
+    - Added `src/storage.js` (`Ouro.storageExtension`) providing `StorageTable`, `StorageDB`, and the `BTKStorage` facade.
+- **Four Books Cookbook, Build Pipeline & Userscripts (`README.md`, `build/`, `src/userscripts/`):**
+    - Rewrote `README.md` as **The Ouro Cookbook (v2.2.0)** structured around the Four Books architecture.
+    - Added `src/userscripts/Ouro-based JSON Page - DEV.js`, relocated `sync-prod.js` to `build/sync-prod.js` (appending `-Ouro<version>` to synced userscript `@version` headers), and added `build/promote.js` for automated SemVer synchronization, CHANGELOG commit extraction, and `dev` $\rightarrow$ `main` promotion.
+
+### Changed
+
+- **Scraper & Userscript Refinements (`src/scraper.js`, `src/userscripts/Ouro-based Movie Graphs - DEV.js`):**
+    - Converted `RouteURL.builder` into an inline `onChange` facet, `Page.toast` into a class-level `ifNeeded` facet built with `DOMValue.create`, and `Page.prototype.request` into an instance `ifNeeded` facet.
+    - Moved domain-specific `TMDB` and `Plex` route variable providers (`tmdbKey`, `plexToken`, `serverUrl`, `machineIdentifier`, `librarySection`) onto `TMDB.providers` and `Plex.providers` in the userscript, removing `PlexServerDependent` and hardcoded provider fallbacks from `src/scraper.js`.
+    - Adopted `DOMValue` fluent helpers (`.badge()`, `.linkify()`, `DOMValue.create()`), declarative `css` and `namespace`, and `Array.prototype.parallel` across `Ouro-based Movie Graphs - DEV.js`.
+
+---
+
 ## [2.1.0] - 2026-11-13
 
 ### Added

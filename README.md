@@ -1,4 +1,4 @@
-# 🐍 The Ouro Cookbook (v2.1.0)
+# 🐍 The Ouro Cookbook (v2.2.0)
 
 ```text
                                    .:-----.
@@ -20,9 +20,9 @@
            ##=@+   -@.    Out of the void, the forge is lit.   @+ -@%
            #@ *@=   -@%      The serpent bites its own tail,    #% .@@#
             @@@=   =@@-         and from the circle,          %% .@@@+
-            *@@=   -@@@.        true creation begins.      =@= +@%%%
-             %@%   :@%-@* *@@.=@@-=@:
-              %@=   @@..@@.            v2.1.0             %@:+@@= -@=
+            *@@=   -@@@.        true creation begins.        =@= +@%%%
+             %@%   :@%-@*                                  *@@.=@@-=@:
+              %@=   @@..@@.            v2.2.0             %@:+@@= -@=
                #@.  :@%  -%@:                         =@@* @@#.  +@-
                 =@-   *@+   .%@@=                 =@@@@@+.    %%.
                   #@: %@=* *@@@@@%--------=@@@@%* *-       .#@=
@@ -33,7 +33,7 @@
                                     .::---:.
 ```
 
-> _"La clarté est le contrepoids des pensées profondes."_  
+> _"La clarté orne les pensées profondes."_  
 > — Luc de Clapiers, marquis de Vauvenargues
 
 ---
@@ -86,7 +86,7 @@ Out of the void, the forge is lit. The serpent bites its own tail, and from the 
     - [Recipe 4.2: Taming Native C++ Host Objects (`Trait.native`)](#recipe-42-taming-native-c-host-objects-traitnative)
     - [Recipe 4.3: Vaults of Memory (`localCache`, `sessionCache`, `globalCache` & `Cacheable`)](#recipe-43-vaults-of-memory-localcache-sessioncache-globalcache--cacheable)
     - [Recipe 4.4: Reactive URL Templates (`RouteURL`)](#recipe-44-reactive-url-templates-routeurl)
-    - [Recipe 4.5: The WebWeaver's Loom (`HTMLPage`, `JSONPage`, `XMLPage`)](#recipe-45-the-webweavers-loom-htmlpage-jsonpage-xmlpage)
+    - [Recipe 4.5: The WebWeaver's Loom (`HTMLPage`, `JSONPage`, `XMLPage` & `DOMValue`)](#recipe-45-the-webweavers-loom-htmlpage-jsonpage-xmlpage--domvalue)
     - [Recipe 4.6: The Constellation Vault (`Graph` Document Store)](#recipe-46-the-constellation-vault-graph-document-store)
 - **[CLI Commands & Repository Layout](#-cli-commands--repository-layout)**
 
@@ -125,6 +125,11 @@ Class({
             this.fleetCount++;
             return new this(spec);
         },
+    },
+
+    // Public shared slots & methods (mounted on BOTH the instance and the class!)
+    shared: {
+        agency: "ISSP",
     },
 
     // Cryptographically isolated private slots & methods (WeakMap/Symbol vault)
@@ -231,7 +236,7 @@ Class({
     name: "PlexClient",
     class: {
         infoUrl:
-            "[https://plex.local/identity?X-Plex-Token=abc123xyz](https://plex.local/identity?X-Plex-Token=abc123xyz)",
+            "https://plex.local/identity?X-Plex-Token=abc123xyz",
 
         // Lazily extracted & memoized on first read of PlexClient.token
         token: {
@@ -523,10 +528,13 @@ Class({
 
 ### Recipe 3.6: The Mirror of Reflection (`inspect`, `stringify`, `toSnapshot`, `audit`)
 
-Because reflection and DevTools formatting live inside `Ouro.introspectionExtension` and `Ouro.devtoolsExtension`, the core allocator stays lean while providing full Smalltalk-style live inspection when loaded:
+Because reflection and DevTools formatting live inside `Ouro.introspectionExtension` and `Ouro.devtoolsExtension`, the core allocator stays lean while providing full Smalltalk / KEE / Symbolics-style live inspection when loaded.
+
+When `"Enable custom formatters"` is checked in Chrome DevTools Settings, `Ouro.devtoolsExtension` registers a **KEE-style navigable tree formatter** (`window.devtoolsFormatters`) for **Classes (`Unit` frames)**, **Instances**, **`Slot` metaobjects**, **`GenericFunction`s**, **`Method`s**, and **`Trait`s**—allowing you to click directly through live superclass/subclass references, faceted slots, private vaults, and AOP advice matrices in the browser console:
 
 ```javascript
 // 1. Structured reflection report (pass { log: true } for rich console groups & tables)
+// Returns live navigable references: { class, superclass, subclassRefs, slots, methodsDictionary, advices, ... }
 const classReport = inspect(Spaceship, { log: true });
 const instanceReport = ship1.inspect({ log: true });
 
@@ -540,7 +548,7 @@ console.log(stringify(ship1));
 // 4. Preserve & inspect the un-normalized raw definition passed to Class(...)
 const rawBlueprint = Spaceship.getDefinition();
 
-// 5. Full MOP inventory of all GenericFunctions, Methods, Classes, and Core footprint
+// 5. Full MOP inventory of all GenericFunctions, Methods, Classes, and Core footprint (Reflect.ownKeys)
 const kernelInventory = Ouro.audit();
 ```
 
@@ -611,21 +619,22 @@ Class({
 
 ### Recipe 4.3: Vaults of Memory (`localCache`, `sessionCache`, `globalCache` & `Cacheable`)
 
-Ouro ships with three storage traits—`localCache` (`localStorage`), `sessionCache` (`sessionStorage`), and `globalCache` (Tampermonkey `GM_getValue`/`GM_setValue` with automatic fallback)—plus the `Cacheable()` method-memoization factory:
+Ouro ships with three storage traits—`localCache` (aliased as `domainCache`, backed by `localStorage`), `sessionCache` (`sessionStorage`), and `globalCache` (Tampermonkey `GM_getValue`/`GM_setValue`/`GM_deleteValue`/`GM_listValues`)—plus the `Cacheable(StorageTrait, methodName, keyExtractor, stateField = "data")` method-memoization factory (including automatic in-flight Promise deduplication for concurrent requests):
 
 ```javascript
 Class({
     name: "CatalogService",
     traits: [
-        globalCache,
-        // Automatically wraps fetchCatalog(id) in an :around cache layer!
-        Cacheable("fetchCatalog", (self, id) => `cat_${id}`, globalCache),
+        // Signature: Cacheable(StorageTrait, methodName, keyExtractor, stateField = "data")
+        // keyExtractor can be a function (...args), a method name, or a dot-path string like "route.signature"
+        Cacheable(localCache, "fetchCatalog", (id) => `cat_${id}`),
     ],
-    cacheTTL: { days: 7 }, // Automatic TTL expiration
+    cacheTTL: 7 * 24 * 60 * 60 * 1000, // Automatic TTL expiration in milliseconds (default: 24h)
 
     async fetchCatalog(id) {
-        // Only executes on cache miss; result is packed & stored automatically
-        return { id, items: ["item1", "item2"] };
+        // Only executes on cache miss; result & this.data are packed & stored automatically
+        this.data = { id, items: ["item1", "item2"] };
+        return this.data;
     },
 });
 
@@ -639,7 +648,7 @@ Located in `src/scraper.js`, `RouteURL` wraps the native `URL` object with templ
 
 ```javascript
 const route = new RouteURL(
-    "[https://api.themoviedb.org/3/movie/$](https://api.themoviedb.org/3/movie/$){tmdbId}?api_key=${apiKey}",
+    "https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${apiKey}",
     { tmdbId: 550, apiKey: "secret" },
 );
 
@@ -648,19 +657,30 @@ route.args.tmdbId = 603; // Reactive Proxy automatically triggers route.build()!
 route.pathname; // "/3/movie/603"
 ```
 
-### Recipe 4.5: The WebWeaver's Loom (`HTMLPage`, `JSONPage`, `XMLPage`)
+### Recipe 4.5: The WebWeaver's Loom (`HTMLPage`, `JSONPage`, `XMLPage` & `DOMValue`)
 
-The Page System turns URL routing, network fetching (`fetch` / `GM_xmlhttpRequest`), DOM/JSON/XML extraction, dependency resolution (`providers`), cross-page enrichment (`enrichers`), and SPA navigation into declarative class blueprints. If a `JSONPage` omits a `schema`, `scrape()` automatically falls back to populating `this.data` with the raw JSON payload:
+The Page System turns URL routing, network fetching (`fetch` / `GM_xmlhttpRequest` with `Page.maxConcurrent = 8` concurrency limiting and automatic retries), DOM/JSON/XML extraction, dependency resolution (`providers`), cross-page enrichment (`enrichers`), and SPA navigation into declarative class blueprints.
+
+Every `Page` progresses through a **5-stage reactive lifecycle** (`dataStatus: 1..5`):
+1. **`fetch()` (`dataStatus = 1`)**: Resolves `providers`, binds to the live browser `document` if `this.isBrowsed()` is true, or fetches remotely via `_networkFetch`.
+2. **`scrape()` (`dataStatus = 2`)**: Runs `DOMExtractor` or `JSONExtractor` against `this.schema` (or falls back to raw JSON on schemaless `JSONPage`s), populating **`this.scraps`** (live `DOMValue` wrappers) and **`this.data`** (unwrapped values). If `namespace` is declared, wraps `this.data` under `this.data[namespace]`.
+3. **`extract()` (`dataStatus = 3`)**: Normalizes and post-processes `this.data`.
+4. **`enrich()` (`dataStatus = 4`)**: Resolves declarative `enrichers` (or imperative `this.enrichWith(...)` / `Array.prototype.parallel(...)` calls) to merge data from other `Page`s or `Graph`s.
+5. **`process()` (`dataStatus = 5`)**: Injects declarative `css` via `Page.addStyle` and mutates the live DOM using **`DOMValue`** fluent helpers (`.badge()`, `.linkify()`, `.css()`, `.attr()`, `.on()`, `.append()`, `DOMValue.create()`).
+
+Calling any later stage (e.g. `MyPage.extract()` or `Page.process(url)`) automatically cascades backwards through `before` hooks via `this.ensure()` to guarantee all earlier stages have completed:
 
 ```javascript
-// 1. Register a JSON API scraper
+// 1. Register a JSON API scraper with declarative providers & session caching on `scrape`
 JSONPage.register({
     name: "tmdbMoviePage",
+    traits: [Cacheable(sessionCache, "scrape", "route.signature")],
     class: {
         routeTemplate:
-            "[https://api.themoviedb.org/3/movie/$](https://api.themoviedb.org/3/movie/$){tmdb_id}?api_key=${tmdbKey}",
+            "https://api.themoviedb.org/3/movie/${tmdb_id}?api_key=${tmdbKey}",
         providers: {
-            tmdbKey: () => TMDB.apiKey, // Lazily resolved before fetch()
+            // Can be a value, a sync/async getter `() => ...`, or an ensure tuple `[getterFn, PrerequisitePage]`
+            tmdbKey: () => TMDB.apiKey,
         },
     },
     schema: {
@@ -670,37 +690,50 @@ JSONPage.register({
     },
 });
 
-// 2. Register a DOM/HTML scraper with CSS selectors & automatic enrichment
+// 2. Register a DOM/HTML scraper with CSS selectors, namespace, css, enrichers & DOMValue UI manipulation
 HTMLPage.register({
     name: "movieDetailPage",
+    namespace: "cinema", // Automatically wraps scraped fields into `this.data.cinema`
+    css: `.ouro-badge-wrapper { border-radius: 6px; }`, // Auto-injected before process()
     class: {
-        routeTemplate:
-            "[https://example-cinema.org/movies/$](https://example-cinema.org/movies/$){slug}",
+        routeTemplate: [
+            "https://example-cinema.org/movies/${slug}",
+            "example-cinema.org/films/*", // Additional match patterns (strings, wildcards, RegExps, or functions)
+        ],
         enrichers: {
-            // Automatically fetches tmdbMoviePage when this.data.tmdb_id is present
-            tmdb: [tmdbMoviePage, ["tmdb_id"]],
+            // Automatically extracts tmdbMoviePage and assigns to `this.data.tmdb` during enrich()
+            tmdb: [tmdbMoviePage, (d) => ({ tmdb_id: d.cinema?.tmdb_id })],
         },
     },
     schema: {
         heading: "h1.movie-title",
+        poster: ["img.poster", "src"],
         tmdb_id: [
             "a[href*='themoviedb.org/movie/']",
-            "href",
-            (href) => href.match(/movie\/(\d+)/)?.[1],
+            (el) => el.getAttribute("href")?.match(/movie\/(\d+)/)?.[1],
         ],
         torrents: [
-            "all_",
-            "div.torrent-row",
-            {
-                quality: ".badge-quality",
-                magnet: ["a.magnet-link", "href"],
-            },
+            [
+                "div.torrent-row",
+                {
+                    quality: ".badge-quality",
+                    magnet: ["a.magnet-link", "href"],
+                },
+            ],
         ],
     },
-    after: {
-        process() {
-            console.log("Scraped & enriched data:", this.data);
-        },
+    process() {
+        // `this.data` holds clean primitive values; `this.scraps` holds live DOMValue element wrappers (.e / .v)
+        this.scraps.poster?.badge(
+            `<span>${this.data.tmdb?.releaseYear || ""}</span>`,
+            "top-left",
+            { backgroundColor: "green" },
+        );
+        if (this.data.tmdb?.imdb_id) {
+            this.scraps.heading?.linkify(
+                `https://www.imdb.com/title/${this.data.tmdb.imdb_id}/`,
+            );
+        }
     },
 });
 
@@ -763,8 +796,11 @@ MovieGraph.put({
 // 2. Multi-key lookup (falls back across provided keys until a match hits)
 const movie = MovieGraph.get({ imdb_id: "tt_unknown", plex_id: "rk-900" });
 
-// 3. Flatten all variants with primary keys
-movie.records;
+// 3. Hierarchical view (`record`) vs. Flattened variants (`records`)
+MovieGraph.record({ imdb_id: "tt0133093" });
+// -> { imdb_id: "tt0133093", tmdb_id: 603, variants: [ { plex_id: "rk-900", ... }, { plex_id: "rk-901", ... } ] }
+
+MovieGraph.records({ imdb_id: "tt0133093" }); // or movie.records
 // -> [
 //   { imdb_id: "tt0133093", tmdb_id: 603, plex_id: "rk-900", server_id: "srv-01", resolution: "1080p" },
 //   { imdb_id: "tt0133093", tmdb_id: 603, plex_id: "rk-901", server_id: "srv-01", resolution: "4K" }
@@ -782,23 +818,30 @@ MovieGraph.prune({ imdb_id: "tt0133093" }, { resolution: "1080p" });
 ## 🛠️ CLI Commands & Repository Layout
 
 ```bash
-# Run the full Ouro + Scraper + Graph test suite in Node.js
+# Run the full Ouro + Scraper + Graph + Storage test suite in Node.js
 npm test
 
-# Synchronize DEV userscript to Prod (gated to the `main` branch)
+# Synchronize DEV userscripts to Prod (gated to the `main` branch)
 npm run sync:prod
 
-# Force-synchronize DEV userscript to Prod regardless of current Git branch
+# Force-synchronize DEV userscripts to Prod regardless of current Git branch
 npm run sync:prod:force
+
+# Promote DEV to Main, sync Prod userscripts, push both branches, and return to DEV
+npm run promote
 ```
 
 ```text
 ouro/
+├── build/
+│   ├── promote.js      # SemVer resolver, CHANGELOG commit extractor & dev -> main promoter
+│   └── sync-prod.js    # Main-gated DEV -> Prod userscript synchronizer
 ├── src/
 │   ├── ouro.js         # Books I–IV: Core MOP Kernel & Standard Extensions
 │   ├── scraper.js      # Page System, RouteURL, DOMValue & Extractors
 │   ├── graph.js        # Graph Document Store & Relational Engine
-│   └── userscripts/    # DEV Userscript & main-gated Prod sync script
+│   ├── storage.js      # Tabular StorageDB / StorageTable & BTK Legacy Facade
+│   └── userscripts/    # DEV & Prod Tampermonkey Userscripts
 ├── tests/
 │   ├── test.js         # Ouro Unit Test Suite
 │   ├── run-node.js     # Headless Node.js Test Runner
